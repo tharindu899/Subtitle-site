@@ -1,0 +1,8 @@
+# Environment / Python
+config.env
+.env
+__pycache__/
+*.py[cod]
+
+# Local files
+.DS_Store

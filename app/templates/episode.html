@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as ui with context %}
+{% block title %}{{ episode.name }} · {{ title.name }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="shell episode-page">
+  <section class="episode-hero">
+    <div class="episode-hero__still">{% if episode.still %}<img src="{{ episode.still }}" alt="{{ episode.name }}">{% else %}{{ ui.poster(title) }}{% endif %}</div>
+    <div class="episode-hero__copy">
+      <div class="tag-row"><span>{{ episode.code }}</span><span>EPISODE FILES</span></div>
+      <span class="episode-hero__series">{{ title.name }}</span>
+      <h1>{{ episode.name or ('Episode ' ~ episode.number) }}</h1>
+      <div class="fact-row"><span>SEASON {{ episode.season }}</span><span>EPISODE {{ episode.number }}</span>{% if episode.rating %}<span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(episode.rating) }}</span>{% endif %}{% if episode.runtime %}<span>{{ episode.runtime }} MIN</span>{% endif %}</div>
+      <p class="sinhala-copy" lang="si">{{ episode.overview or 'Matching Sinhala subtitle files are ready below.' }}</p>
+    </div>
+  </section>
+
+  {% if episode.manualNoteHtml %}<section class="note-card note-card--episode"><header><img src="/brand.svg?v={{ brand_version }}" alt="{{ site_name }}"><div><span>{{ site_name|upper }} NOTE</span><h2>Episode note</h2></div></header><div class="note-card__content sinhala-copy" lang="si">{{ episode.manualNoteHtml | safe }}</div></section>{% endif %}
+
+  {{ ui.ad_slot(ads.title_inline) }}
+
+  <section class="section ticket-section" id="subtitle-files"><div class="section__head"><div><span>{{ episode.code }}</span><h2>Available files</h2></div><p>{{ subtitles|length }} file{{ '' if subtitles|length == 1 else 's' }}</p></div><div class="ticket-list">{% for subtitle in subtitles %}{{ ui.release_card(subtitle, loop.index0) }}{% endfor %}</div></section>
+
+  <nav class="ep-pager" aria-label="Episode navigation">
+    {% if previous_episode %}
+      <a class="ep-pager__link" href="{{ url_for('website_episode', title_id=title.id, season='%02d'|format(previous_episode.season), episode='%02d'|format(previous_episode.episode)) }}" aria-label="Previous episode"><span><i class="fa-solid fa-arrow-left"></i> PREVIOUS</span><b>S{{ '%02d'|format(previous_episode.season) }}E{{ '%02d'|format(previous_episode.episode) }}</b></a>
+    {% else %}
+      <span class="ep-pager__link is-disabled" aria-disabled="true"><span><i class="fa-solid fa-arrow-left"></i> PREVIOUS</span><b>START</b></span>
+    {% endif %}
+    <a class="ep-pager__link ep-pager__link--all" href="{{ url_for('website_title', title_id=title.id) }}"><span>ALL EPISODES</span><b>Episode guide</b></a>
+    {% if next_episode %}
+      <a class="ep-pager__link ep-pager__link--next" href="{{ url_for('website_episode', title_id=title.id, season='%02d'|format(next_episode.season), episode='%02d'|format(next_episode.episode)) }}" aria-label="Next episode"><span>NEXT <i class="fa-solid fa-arrow-right"></i></span><b>S{{ '%02d'|format(next_episode.season) }}E{{ '%02d'|format(next_episode.episode) }}</b></a>
+    {% else %}
+      <span class="ep-pager__link ep-pager__link--next is-disabled" aria-disabled="true"><span>NEXT <i class="fa-solid fa-arrow-right"></i></span><b>LAST</b></span>
+    {% endif %}
+  </nav>
+</main>
+{% endblock %}

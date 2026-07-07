@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as ui with context %}
+{% block title %}Archive · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="shell archive-page">
+  <section class="archive-header">
+    <div><span class="eyebrow">THE {{ site_name|upper }} ARCHIVE</span><h1>Find the right file <em>first.</em></h1><p>Search release-matched Sinhala subtitle files for movies and episodes.</p></div>
+    <div class="archive-header__count"><b>{{ total }}</b><span>matching titles</span></div>
+  </section>
+
+  <section class="archive-toolbar">
+    <form class="archive-toolbar__search" action="{{ url_for('website_browse') }}" method="get" role="search">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input name="q" value="{{ query }}" placeholder="Search titles" aria-label="Search titles">
+      {% if kind != 'all' %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+      <button type="submit">Search</button>
+    </form>
+    <nav class="filter-tabs" aria-label="Title filter">
+      <a class="{{ 'is-current' if kind == 'all' else '' }}" href="{{ url_for('website_browse') }}{% if query %}?q={{ query }}{% endif %}">All</a>
+      <a class="{{ 'is-current' if kind == 'movie' else '' }}" href="{{ url_for('website_browse') }}?kind=movie{% if query %}&q={{ query }}{% endif %}">Movies</a>
+      <a class="{{ 'is-current' if kind == 'tv' else '' }}" href="{{ url_for('website_browse') }}?kind=tv{% if query %}&q={{ query }}{% endif %}">Series</a>
+    </nav>
+  </section>
+
+  <div class="result-line"><span>{% if query %}Results for "{{ query }}"{% else %}All catalogued titles{% endif %}</span><span>Page {{ page }} of {{ pages }}</span></div>
+
+  {{ ui.ad_slot(ads.browse_inline) }}
+
+  {% if titles %}
+    <div class="stamp-grid stamp-grid--archive">{% for title in titles %}{{ ui.title_card(title) }}{% endfor %}</div>
+  {% else %}
+    <section class="void-card"><span>NO MATCHES</span><h2>Nothing found for that search.</h2><p>Try another movie, series or release name.</p><a class="btn btn--stamp" href="{{ url_for('website_browse') }}">Browse all titles</a></section>
+  {% endif %}
+
+  {% if pages > 1 %}
+    <nav class="pager" aria-label="Page navigation">
+      {% if page > 1 %}<a href="{{ url_for('website_browse') }}?q={{ query }}&kind={{ kind }}&page={{ page - 1 }}"><i class="fa-solid fa-arrow-left"></i> Previous</a>{% else %}<span class="is-disabled"><i class="fa-solid fa-arrow-left"></i> Previous</span>{% endif %}
+      <span>{{ page }} / {{ pages }}</span>
+      {% if page < pages %}<a href="{{ url_for('website_browse') }}?q={{ query }}&kind={{ kind }}&page={{ page + 1 }}">Next <i class="fa-solid fa-arrow-right"></i></a>{% else %}<span class="is-disabled">Next <i class="fa-solid fa-arrow-right"></i></span>{% endif %}
+    </nav>
+  {% endif %}
+</main>
+{% endblock %}

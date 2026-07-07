@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-label="CineLanka — Sinhala Subtitle Archive">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#171310"/>
+      <stop offset="1" stop-color="#0a0908"/>
+    </linearGradient>
+    <linearGradient id="reel" x1="60" y1="60" x2="260" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc25c"/>
+      <stop offset="1" stop-color="#eda23c"/>
+    </linearGradient>
+    <linearGradient id="titleFill" x1="250" y1="90" x2="900" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe0a3"/>
+      <stop offset=".55" stop-color="#eda23c"/>
+      <stop offset="1" stop-color="#c1443a"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="1040" y1="90" x2="1150" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e0584c"/>
+      <stop offset="1" stop-color="#7c2b26"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feFlood flood-color="#eda23c" flood-opacity=".45" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="300" rx="22" fill="url(#bg)"/>
+  <rect x="10" y="10" width="1180" height="280" rx="16" fill="none" stroke="rgba(242,236,221,.12)" stroke-width="2"/>
+
+  <!-- film sprocket holes along top and bottom edges -->
+  <g fill="rgba(242,236,221,.16)">
+    <rect x="36" y="28" width="22" height="14" rx="4"/>
+    <rect x="96" y="28" width="22" height="14" rx="4"/>
+    <rect x="156" y="28" width="22" height="14" rx="4"/>
+    <rect x="1022" y="28" width="22" height="14" rx="4"/>
+    <rect x="1082" y="28" width="22" height="14" rx="4"/>
+    <rect x="1142" y="28" width="22" height="14" rx="4"/>
+    <rect x="36" y="258" width="22" height="14" rx="4"/>
+    <rect x="96" y="258" width="22" height="14" rx="4"/>
+    <rect x="156" y="258" width="22" height="14" rx="4"/>
+    <rect x="1022" y="258" width="22" height="14" rx="4"/>
+    <rect x="1082" y="258" width="22" height="14" rx="4"/>
+    <rect x="1142" y="258" width="22" height="14" rx="4"/>
+  </g>
+
+  <!-- film reel mark -->
+  <g filter="url(#glow)">
+    <circle cx="150" cy="150" r="78" fill="none" stroke="url(#reel)" stroke-width="10"/>
+    <circle cx="150" cy="150" r="18" fill="url(#reel)"/>
+    <circle cx="150" cy="94" r="15" fill="none" stroke="url(#reel)" stroke-width="9"/>
+    <circle cx="101" cy="177" r="15" fill="none" stroke="url(#reel)" stroke-width="9"/>
+    <circle cx="199" cy="177" r="15" fill="none" stroke="url(#reel)" stroke-width="9"/>
+  </g>
+
+  <!-- title -->
+  <text x="258" y="158" font-family="Fraunces, Georgia, 'Times New Roman', serif" font-size="74" font-weight="700" fill="url(#titleFill)">CineLanka</text>
+  <text x="262" y="196" font-family="'Inter','Segoe UI',sans-serif" font-size="20" letter-spacing="7" fill="#b3a68d">SINHALA SUBTITLE ARCHIVE</text>
+
+  <!-- right badge -->
+  <g>
+    <circle cx="1100" cy="150" r="60" fill="#0c0b09" stroke="url(#badge)" stroke-width="6"/>
+    <circle cx="1100" cy="150" r="60" fill="none" stroke="#0c0b09" stroke-width="2" stroke-dasharray="2 7"/>
+    <text x="1100" y="173" text-anchor="middle" font-family="Georgia, serif" font-size="48" font-weight="700" fill="#f2ecdd">සි</text>
+  </g>
+</svg>

@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block title %}{{ code }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="shell error-view"><span>REEL {{ code }}</span><h1>{{ heading }}</h1><p>{{ message }}</p><a class="btn btn--stamp" href="{{ url_for('website_home') }}">Go home</a></main>
+{% endblock %}

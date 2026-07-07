@@ -1,0 +1,59 @@
+{% macro poster(title, class_name='') -%}
+  <div class="reel-frame {{ class_name }}">
+    {% if title.poster %}<img src="{{ title.poster }}" alt="{{ title.name }} poster" loading="lazy">{% else %}<span>{{ 'TV' if title.type == 'tv' else 'FILM' }}</span>{% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro type_label(title) -%}{{ 'Series' if title.type == 'tv' else 'Movie' }}{%- endmacro %}
+
+{% macro title_card(title, large=false) -%}
+  <article class="stamp-card {{ 'stamp-card--large' if large else '' }}">
+    <a class="stamp-card__frame" href="{{ url_for('website_title', title_id=title.id) }}" aria-label="Open {{ title.name }}">
+      {{ poster(title) }}
+      <span class="stamp-card__shade"></span>
+      <span class="stamp-card__kind">{{ type_label(title) }}</span>
+      {% if title.rating %}<span class="stamp-card__rating"><i class="fa-solid fa-star"></i> {{ '%.1f'|format(title.rating) }}</span>{% endif %}
+      <span class="stamp-card__open">Open file <i class="fa-solid fa-arrow-right"></i></span>
+    </a>
+    <div class="stamp-card__copy"><div class="stamp-card__stats"><span>{{ title.year or '—' }}</span><span>{{ title.subtitleCount }} files</span></div><a class="stamp-card__title" href="{{ url_for('website_title', title_id=title.id) }}">{{ title.name }}</a></div>
+  </article>
+{%- endmacro %}
+
+{% macro title_list_item(title) -%}
+  <a class="slip-row" href="{{ url_for('website_title', title_id=title.id) }}">
+    {{ poster(title) }}
+    <span class="slip-row__copy"><em>{{ type_label(title) }}</em><b>{{ title.name }}</b><small>{{ title.year or '—' }} · {{ title.subtitleCount }} files</small></span>
+    <span class="slip-row__arrow"><i class="fa-solid fa-arrow-up-right"></i></span>
+  </a>
+{%- endmacro %}
+
+{% macro release_card(subtitle, index=0) -%}
+  <article class="ticket">
+    <div class="ticket__stub">
+      <span class="ticket__no">No.</span>
+      <span class="ticket__num">{{ '%02d'|format(index + 1) }}</span>
+    </div>
+    <div class="ticket__perf" aria-hidden="true"></div>
+    <div class="ticket__main">
+      <h3>{{ subtitle.filename }}</h3>
+      {% if subtitle.technicalLabel %}<p>{{ subtitle.technicalLabel }}</p>{% endif %}
+      <div class="ticket__meta"><span>{{ subtitle.sizeLabel }}</span><span>{{ subtitle.maker }}</span>{% if subtitle.downloads %}<span>{{ subtitle.downloads }} download{{ '' if subtitle.downloads == 1 else 's' }}</span>{% endif %}</div>
+      {% if subtitle.note %}<div class="ticket__note sinhala-copy" lang="si">{{ subtitle.note }}</div>{% endif %}
+    </div>
+    <div class="ticket__perf" aria-hidden="true"></div>
+    <div class="ticket__actions">
+      <a class="ticket__download" href="{{ subtitle.downloadUrl }}" download><i class="fa-solid fa-download"></i> Download</a>
+      <button class="ticket__report" type="button" data-report-url="/api/public/subtitles/{{ subtitle.id }}/report"><i class="fa-solid fa-flag"></i> Report</button>
+    </div>
+  </article>
+{%- endmacro %}
+
+{% macro episode_grid(title, episodes, active_slug='') -%}
+  {% set seasons = episodes | map(attribute='season') | unique | list | sort %}
+  <section class="reel-switcher" data-episode-box>
+    <div class="reel-switcher__tabs" role="tablist" aria-label="Seasons">{% for season in seasons %}<button type="button" class="{{ 'is-current' if loop.first else '' }}" data-season-tab="{{ season }}" role="tab" aria-selected="{{ 'true' if loop.first else 'false' }}">Season {{ season }}</button>{% endfor %}</div>
+    {% for season in seasons %}<div class="reel-switcher__panel" data-season="{{ season }}" {% if not loop.first %}hidden{% endif %}><div class="reel-switcher__numbers" aria-label="Season {{ season }} episodes">{% for item in episodes if item.season == season %}<a class="{{ 'is-current' if item.slug == active_slug else '' }}" href="{{ url_for('website_episode', title_id=title.id, season='%02d'|format(item.season), episode='%02d'|format(item.episode)) }}" title="S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}">{{ item.episode }}</a>{% endfor %}</div></div>{% endfor %}
+  </section>
+{%- endmacro %}
+
+{% macro ad_slot(code) -%}{% if code %}<aside class="ad-frame"><span>ADVERTISEMENT</span><div>{{ code | safe }}</div></aside>{% endif %}{%- endmacro %}
