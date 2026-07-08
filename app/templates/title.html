@@ -8,9 +8,9 @@
     <div class="detail-hero__layout">
       {{ ui.poster(title, 'detail-hero__poster') }}
       <div class="detail-hero__copy">
-        <div class="tag-row"><span>{{ ui.type_label(title) }}</span><span>SINHALA SUBTITLES</span></div>
+        <div class="tag-row"><span>{{ ui.type_label(title) }}</span><span>Sinhala subtitles</span></div>
         <h1>{{ title.name }}</h1>
-        <div class="fact-row"><span>{{ title.year or '—' }}</span><span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(title.rating or 0) }}</span><span>{{ title.subtitleCount }} FILES</span></div>
+        <div class="fact-row"><span>{{ title.year or '—' }}</span><span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(title.rating or 0) }}</span><span>{{ title.subtitleCount }} files</span></div>
         <p>{{ title.overview or 'Release-matched Sinhala subtitle files are available below.' }}</p>
         <div class="vote-row" data-reaction-url="/api/public/titles/{{ title.id }}/reaction">
           <button type="button" data-vote="1" class="{{ 'is-active' if reactions.value == 1 else '' }}"><i class="fa-solid fa-thumbs-up"></i> Helpful <b data-like-count>{{ reactions.likes }}</b></button>
@@ -23,7 +23,7 @@
 
 <main class="shell detail-body">
   {% if title.type == 'movie' and page_note_html %}
-    <section class="note-card"><header><img src="/brand.svg?v={{ brand_version }}" alt="{{ site_name }}"><div><span>{{ site_name|upper }} NOTE</span><h2>Release note</h2></div></header><div class="note-card__content sinhala-copy" lang="si">{{ page_note_html | safe }}</div></section>
+    <section class="note-card"><header><img src="/brand.svg?v={{ brand_version }}" alt="{{ site_name }}"><div><span>{{ site_name }} note</span><h2>Release note</h2></div></header><div class="note-card__content sinhala-copy" lang="si">{{ page_note_html | safe }}</div></section>
   {% endif %}
 
   {{ ui.ad_slot(ads.title_inline) }}
@@ -43,7 +43,7 @@
   {% endif %}
 
   {% if cast %}
-    <section class="section cast-section"><div class="section__head"><div><span>On screen</span><h2>Cast</h2></div></div><div class="cast-grid">{% for person in cast %}<article class="cast-chip">{% if person.photo %}<img src="{{ person.photo }}" alt="{{ person.name }}">{% else %}<span>{{ person.name[:1] }}</span>{% endif %}<div><b>{{ person.name }}</b>{% if person.character %}<small>{{ person.character }}</small>{% endif %}</div></article>{% endfor %}</div></section>
+    <section class="section cast-section"><div class="section__head"><div><span>Cast board</span><h2>On screen</h2></div></div><div class="cast-grid">{% for person in cast %}<article class="cast-chip">{% if person.photo %}<img src="{{ person.photo }}" alt="{{ person.name }}">{% else %}<span>{{ person.name[:1] }}</span>{% endif %}<div><b>{{ person.name }}</b>{% if person.character %}<small>{{ person.character }}</small>{% endif %}</div></article>{% endfor %}</div></section>
   {% endif %}
 
   {% include 'partials/comments.html' %}

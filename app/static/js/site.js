@@ -160,9 +160,9 @@
         const result = await requestJson(form.dataset.postUrl, { method: 'POST', body: JSON.stringify({ name: fields.get('name'), text: fields.get('text') }) })
         const list = form.closest('[data-comments]')?.querySelector('[data-comment-list]')
         if (list) {
-          list.querySelector('.discussion-empty')?.remove()
+          list.querySelector('.comment-empty')?.remove()
           const comment = document.createElement('article')
-          comment.className = 'discussion-comment'
+          comment.className = 'comment-card'
           const header = document.createElement('header')
           const author = document.createElement('b')
           const date = document.createElement('span')
