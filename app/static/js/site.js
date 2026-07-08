@@ -17,6 +17,28 @@
   const navDock = document.querySelector('[data-site-nav-dock]')
   const navSpacer = document.querySelector('[data-site-nav-spacer]')
 
+  // The ticker keeps the original two-lane, -50% marquee motion. The saved ad
+  // code is parsed once; the second lane is a script-free visual clone, so ad
+  // scripts cannot run twice or stack duplicate text/buttons on top of each other.
+  const buildTickerLoopCopy = (ticker) => {
+    const source = ticker.querySelector('[data-ad-source]')
+    const target = ticker.querySelector('[data-ad-loop-copy]')
+    if (!source || !target || target.childNodes.length) return
+
+    const copy = source.cloneNode(true)
+    copy.removeAttribute('data-ad-source')
+    copy.removeAttribute('id')
+    copy.querySelectorAll('script').forEach((script) => script.remove())
+    copy.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
+    copy.querySelectorAll('input, button, select, textarea').forEach((node) => {
+      node.tabIndex = -1
+      node.setAttribute('aria-hidden', 'true')
+    })
+    target.replaceChildren(...copy.childNodes)
+  }
+
+  document.querySelectorAll('[data-ad-ticker]').forEach(buildTickerLoopCopy)
+
   // The dock is fixed (not sticky), so it cannot disappear while a page scrolls.
   // Keep an equal spacer in the document flow; ResizeObserver also covers ad images
   // or iframes that finish loading after the first paint.

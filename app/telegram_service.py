@@ -25,9 +25,9 @@ TGCRYPTO_VERSION = getattr(tgcrypto, "__version__", "installed")
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ParseMode
-from pyrogram.errors import PeerIdInvalid
+from pyrogram.errors import MessageNotModified, PeerIdInvalid
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
-from pyrogram.types import BotCommand, CallbackQuery, InlineKeyboardMarkup, Message
+from pyrogram.types import BotCommand, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto, Message
 
 from .config import settings
 from .database import get_db, utcnow
@@ -221,8 +221,14 @@ class TelegramService:
             bot_token=settings.bot_token,
             no_updates=False,
             workdir="/tmp",
+            # PyroFork defaults to 1 concurrent upload/download transmission.
+            # Subtitle files are small but members can submit several in a
+            # row; raising this lets those transfers overlap instead of
+            # queueing strictly one-at-a-time, which is the main source of a
+            # "slow" feeling bot under normal (non-abusive) use.
+            max_concurrent_transmissions=4,
         )
-        commands = ["start", "help", "submit", "myfiles", "library", "members", "reports", "ads", "connectchannel", "cancel"]
+        commands = ["start", "help", "menu", "submit", "myfiles", "library", "members", "reports", "ads", "connectchannel", "cancel"]
         # Remember every message from the configured channel. This binds a
         # private channel to the current PyroFork peer cache even when the post
         # is not a subtitle document.
@@ -250,6 +256,7 @@ class TelegramService:
             await self.client.set_bot_commands(
                 [
                     BotCommand("start", "Open subtitle workspace"),
+                    BotCommand("menu", "Open the current menu"),
                     BotCommand("submit", "Send a subtitle file"),
                     BotCommand("myfiles", "Manage your uploaded files"),
                     BotCommand("library", "Browse team library"),
@@ -340,13 +347,58 @@ class TelegramService:
         poster_url: str = "",
         previous_message_id: int | None = None,
     ) -> Message:
+        """Update one persistent menu card in place instead of delete + resend.
+
+        Telegram lets a bot edit its own messages (text, caption, photo and
+        keyboard) with no practical time limit, so every menu screen reuses
+        the same message box. A delete-and-send-new only happens as a last
+        resort, when Telegram genuinely cannot apply an in-place edit (the
+        card type must flip between text-only and photo, or the stored
+        message was deleted/too old for Telegram to touch).
+        """
         client = self.require()
+        poster = await self._remote_poster(poster_url) if poster_url else None
+
+        if previous_message_id:
+            try:
+                if poster:
+                    return await client.edit_message_media(
+                        chat_id,
+                        previous_message_id,
+                        InputMediaPhoto(poster, caption=text, parse_mode=ParseMode.HTML),
+                        reply_markup=keyboard,
+                    )
+                return await client.edit_message_text(
+                    chat_id,
+                    previous_message_id,
+                    text,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception as primary_error:
+                # The stored message may be the "other shape" (e.g. a plain
+                # text card when a poster card was requested). Editing just
+                # the caption keeps the same message alive either way, even
+                # though the photo itself cannot change without media edit.
+                try:
+                    return await client.edit_message_caption(
+                        chat_id,
+                        previous_message_id,
+                        caption=text,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    logger.debug("Could not edit menu card %s in place: %s", previous_message_id, primary_error)
+
+        # Fallback: no previous message, or it could not be edited at all
+        # (deleted by the user, wrong chat, or otherwise unreachable).
         if previous_message_id:
             try:
                 await client.delete_messages(chat_id, previous_message_id)
             except Exception:
                 pass
-        poster = await self._remote_poster(poster_url)
         if poster:
             try:
                 return await client.send_photo(chat_id, poster, caption=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
@@ -433,6 +485,11 @@ class TelegramService:
                 parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
             )
+        except MessageNotModified:
+            # Telegram already has this exact caption + keyboard. That is the
+            # desired end state, not a failure, so treat it as a silent success
+            # instead of surfacing a "channel update failed" error to the user.
+            logger.debug("Channel caption %s already matched the requested content; nothing to change.", message_id)
         except Exception as error:
             raise TelegramStorageError(f"Telegram could not update the channel caption: {error}") from error
 

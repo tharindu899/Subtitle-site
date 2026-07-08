@@ -17,9 +17,10 @@
 
   <div class="site-nav-dock" data-site-nav-dock>
     {% if ads.site_bar_top %}
-      <div class="ad-ticker" aria-label="Advertisement">
+      <div class="ad-ticker" data-ad-ticker aria-label="Advertisement">
         <div class="ad-ticker__track">
-          <div class="ad-ticker__item">{{ ads.site_bar_top | safe }}</div>
+          <div class="ad-ticker__item" data-ad-source>{{ ads.site_bar_top | safe }}</div>
+          <div class="ad-ticker__item" data-ad-loop-copy aria-hidden="true"></div>
         </div>
       </div>
     {% endif %}
@@ -62,9 +63,10 @@
     </header>
 
     {% if ads.site_bar_bottom %}
-      <aside class="ad-ticker ad-ticker--nav-bottom" aria-label="Advertisement">
+      <aside class="ad-ticker ad-ticker--nav-bottom" data-ad-ticker aria-label="Advertisement">
         <div class="ad-ticker__track">
-          <div class="ad-ticker__item">{{ ads.site_bar_bottom | safe }}</div>
+          <div class="ad-ticker__item" data-ad-source>{{ ads.site_bar_bottom | safe }}</div>
+          <div class="ad-ticker__item" data-ad-loop-copy aria-hidden="true"></div>
         </div>
       </aside>
     {% endif %}

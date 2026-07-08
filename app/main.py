@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import logging
@@ -173,12 +174,20 @@ def channel_page_keyboard(title: dict[str, Any], season: Any = None, episode: An
 # page. Keep the useful editorial HTML while stripping scripts, embedded pages,
 # styles and unsafe URL schemes before it ever reaches the website.
 RICH_NOTE_TAGS = frozenset({
-    "a", "b", "blockquote", "br", "details", "div", "em", "figcaption",
+    "a", "article", "b", "blockquote", "br", "details", "div", "em", "figcaption",
     "figure", "h2", "h3", "h4", "hr", "i", "img", "li", "mark", "ol",
     "p", "span", "strong", "summary", "table", "tbody", "td", "th", "thead",
     "tr", "u", "ul",
 })
 RICH_NOTE_VOID_TAGS = frozenset({"br", "hr", "img"})
+# Rich-note classes are intentionally allow-listed.  This lets the site offer
+# polished review cards while keeping pasted HTML free from arbitrary CSS or
+# script-controlled selectors.
+RICH_NOTE_ALLOWED_CLASSES = frozenset({
+    "cinelanka-review", "review-top", "review-season", "review-episode",
+    "review-title", "review-text", "review-footer", "review-rating",
+    "review-tags",
+})
 RICH_NOTE_BLOCKED_TAGS = frozenset({
     "applet", "base", "button", "embed", "form", "frame", "frameset", "iframe",
     "input", "link", "math", "meta", "noscript", "object", "script", "select",
@@ -258,7 +267,14 @@ class RichNoteSanitizer(HTMLParser):
             if height:
                 extras += f' height="{height}"'
             return f' src="{html.escape(src, quote=True)}"{extras}'
-        return ""
+
+        # Never preserve arbitrary classes.  The small review-card class list
+        # above is the only visual language a note may request.
+        classes = [
+            name for name in re.split(r"\s+", values.get("class", "").strip())
+            if name in RICH_NOTE_ALLOWED_CLASSES
+        ]
+        return f' class="{html.escape(" ".join(classes), quote=True)}"' if classes else ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -390,6 +406,32 @@ def title_episode_groups(subtitles: list[dict[str, Any]]) -> list[dict[str, Any]
     ]
 
 
+def wrap_legacy_review_note(value: str) -> str:
+    """Restore the review-card wrapper for notes saved before the style fix.
+
+    Earlier builds saved the Demon Slayer review body with the inner text only
+    on some databases.  The website styles the review through the
+    ``cinelanka-review`` wrapper, so detect those legacy records and wrap them
+    at render time without touching normal user notes.
+    """
+    note = str(value or "").strip()
+    if not note or "cinelanka-review" in note:
+        return note
+    lowered = note.lower()
+    has_review_markup = any(token in lowered for token in (
+        "review-season", "review-episode", "review-title", "review-text",
+        "review-footer", "review-rating", "review-tags",
+    ))
+    looks_like_seeded_review = (
+        "demon slayer" in lowered
+        and "episode" in lowered
+        and ("/ 10" in lowered or "sabino" in lowered or "sabito" in lowered or "tanjiro" in lowered)
+    )
+    if has_review_markup or looks_like_seeded_review:
+        return f'<div class="cinelanka-review">{note}</div>'
+    return note
+
+
 def episode_page_note_html(raw: str | None) -> str:
     """Sanitise the optional rich note attached to one TV episode page.
 
@@ -397,7 +439,177 @@ def episode_page_note_html(raw: str | None) -> str:
     notes. A team member can add a long Sinhala explanation, images, lists,
     links and detail boxes without exposing unsafe markup on the public site.
     """
-    return title_page_note_html(raw)
+    return wrap_legacy_review_note(title_page_note_html(raw))
+
+
+# These reviews are stored automatically for the first three Season 1 Demon
+# Slayer pages.  An owner/editor can still open the episode note in Telegram,
+# replace the wording, or clear it; custom notes always take priority.
+DEMON_SLAYER_TMDB_ID = 85937
+DEMON_SLAYER_REVIEW_NOTES: dict[tuple[int, int], str] = {
+    (1, 1): """
+<div class="cinelanka-review">
+  <div class="review-top">
+    <span class="review-season">DEMON SLAYER · SEASON 01</span>
+    <span class="review-episode">EPISODE 01</span>
+  </div>
+  <h3 class="review-title">කුරිරු ආරම්භයක් — Cruelty</h3>
+  <p class="review-text">Demon Slayer කතාවට ඉතාමත් ප්‍රබල, හිතට වැදෙන ආරම්භයක් දෙන්නේ මේ episode එකයි. Tanjiro Kamadoගේ සරල සහ ආදරණීය පවුල් ජීවිතය එක දවසකදී සම්පූර්ණයෙන්ම වෙනස් වන ආකාරය මෙහිදී දැකගන්න ලැබෙනවා. මුලින්ම කතාව නිහඬ ගම්මාන ජීවිතයක සන්සුන් හැඟීමක් ගෙන එන නමුත්, පසුව එය අඳුරු සහ emotional atmosphere එකකට මාරු වෙනවා.</p>
+  <p class="review-text">මේ කොටසේ ලොකුම ශක්තිය Tanjiro සහ Nezuko අතර තිබෙන සහෝදර බැඳීමයි. මේක action anime එකක් පමණක් නොවෙයි කියන එක පළවෙනි episode එකෙන්ම පැහැදිලි වෙනවා. පවුල, දුක, කැපවීම සහ කිසිම තත්ත්වයකදී අතහැර නොයෑම ගැන කතාවක් ලෙස මෙය හිතට ඇලෙනවා. Animation, background music සහ emotional pacing එක එකටම වැඩ කරන නිසා අවසානයට එනකොට ඉදිරියට මොනවා වෙයිද කියලා බලන්න හොඳ curiosity එකක් ඇති කරනවා.</p>
+  <p class="review-text">නව anime viewer කෙනෙක්ට වුණත් shounen fan කෙනෙක්ට වුණත් මේක ඉතා හොඳ opening episode එකක්. demons වල භයානකකම සහ Tanjiroගේ අලුත් ගමනට හේතුව ඉතාම ලස්සනට establish කරනවා. අවසානයේ ඇති emotional weight එක නිසා මේ කොටස season එකේ strongest introductions වලින් එකක් ලෙස දැනෙනවා.</p>
+  <div class="review-footer"><span class="review-rating">★ 9.3 / 10</span><span class="review-tags">Emotional · Dark Fantasy · Family · Action</span></div>
+</div>
+""",
+    (1, 2): """
+<div class="cinelanka-review">
+  <div class="review-top">
+    <span class="review-season">DEMON SLAYER · SEASON 01</span>
+    <span class="review-episode">EPISODE 02</span>
+  </div>
+  <h3 class="review-title">නව මඟපෙන්වීමක් — Trainer Sakonji Urokodaki</h3>
+  <p class="review-text">පළවෙනි episode එකේ ඇති වූ දුක සහ shock එකෙන් පසු, මේ කොටස Tanjiroගේ අරමුණ පැහැදිලි කරලා දෙන important turning point එකක්. ඔහුට සටන් කරන්න හේතුවක් තිබුණත් ඒ සඳහා අවශ්‍ය ශක්තිය, දැනුම සහ discipline එක තවමත් නැහැ. ඒ නිසා මේ episode එක emotional pain එකෙන් purposeful journey එකකට මාරු වෙන හොඳ පියවරක් වගේ දැනෙනවා.</p>
+  <p class="review-text">Urokodakiගේ character introduction එකෙන් Demon Slayer world එක තවත් ගැඹුරු වෙනවා. Tanjiroට හමු වන මිනිසුන් සහ ඔහුගේ ගමන හරහා demons සමඟ සටන් කිරීම raw strength එකක් පමණක් නොවන බව මෙහිදී පෙන්වනවා. Nezukoව නැවත මනුෂ්‍යයෙකු කරගන්නත් අහිංසක මිනිසුන් ආරක්ෂා කරන්නත් ඔහුට විශාල කැපවීමක් අවශ්‍ය බවත් තේරෙනවා.</p>
+  <p class="review-text">පළවෙනි කොටසට වඩා මෙහි pace එක සෙමින් build වුණත් boring නැහැ. ඒ slow build එක Tanjiroගේ character growth එකට අවශ්‍ය space එක දෙනවා. ඔහුගේ compassion, determination සහ මෘදු හදවත ඔහුගේ ලොකුම strength එකක් බවත්, ඒ qualities ඉදිරියේදී ඔහුගේ සටන් ශක්තියටත් බලපාන බවත් ඉඟි කරනවා.</p>
+  <div class="review-footer"><span class="review-rating">★ 9.0 / 10</span><span class="review-tags">Journey · Training · Mystery · Character Growth</span></div>
+</div>
+""",
+    (1, 3): """
+<div class="cinelanka-review">
+  <div class="review-top">
+    <span class="review-season">DEMON SLAYER · SEASON 01</span>
+    <span class="review-episode">EPISODE 03</span>
+  </div>
+  <h3 class="review-title">ශක්තියේ මාර්ගය — Sabito and Makomo</h3>
+  <p class="review-text">Episode 03 එක Tanjiroගේ training journey එකට සම්පූර්ණයෙන්ම ඇතුල් කරන කොටසක්. Demon Slayer කෙනෙක් වෙන්න කැමැත්ත තිබීම පමණක් ප්‍රමාණවත් නැති බව මෙහිදී පැහැදිලි වෙනවා. ශරීර ශක්තිය, වේගය, හුස්ම පාලනය, අවධානය සහ මනසින් අතහැර නොයන හැකියාව කියන දේවල් ඔහුට එකින් එක ඉගෙනගන්න වෙනවා.</p>
+  <p class="review-text">Sabito සහ Makomoගේ appearance එක මේ episode එකට වෙනම magical feel එකක් දෙනවා. ඔවුන් Tanjiroට training partners වගේ පෙනුණත්, ඒ දෙන්නා හරහා ඔහුගේ weak points, fear සහ limits පැහැදිලි වෙන්න පටන් ගන්නවා. Tanjiro ගොඩක් දක්ෂ character කෙනෙක් වගේ පෙන්වන්නේ නැහැ; ඔහු වැටෙනවා, අමාරුවෙන් නැගිටිනවා, නැවත උත්සාහ කරනවා. ඒ නිසා ඔහුගේ growth එක natural සහ satisfying feel එකක් දෙනවා.</p>
+  <p class="review-text">මේ episode එකේ visual mood එකත් ඉතාම ලස්සනයි. කඳු, වනාන්තර, misty atmosphere සහ training scenes එකට එකතු වෙලා anime එකේ fantasy side එක තවත් ගැඹුරු කරනවා. Action තරමක් අඩු වුණත්, ඉදිරියේ එන Demon Slayer Corps selection සහ Tanjiroගේ real battles සඳහා හොඳ foundation එකක් මේ කොටසෙන් හදා දෙනවා.</p>
+  <div class="review-footer"><span class="review-rating">★ 9.1 / 10</span><span class="review-tags">Training · Determination · Fantasy · Build-up</span></div>
+</div>
+""",
+}
+
+
+def is_demon_slayer_title(title: dict[str, Any] | None) -> bool:
+    if not title or str(title.get("tmdb_type") or "").lower() != "tv":
+        return False
+    try:
+        if int(title.get("tmdb_id") or 0) == DEMON_SLAYER_TMDB_ID:
+            return True
+    except (TypeError, ValueError):
+        pass
+    name = " ".join(
+        str(title.get(field) or "")
+        for field in ("name", "original_name", "title")
+    ).casefold()
+    return "demon slayer" in name or "kimetsu no yaiba" in name
+
+
+def default_episode_review_note_html(title: dict[str, Any], season: int, episode: int) -> str:
+    if not is_demon_slayer_title(title):
+        return ""
+    return episode_page_note_html(DEMON_SLAYER_REVIEW_NOTES.get((int(season), int(episode)), ""))
+
+
+async def seed_demon_slayer_episode_reviews(title: dict[str, Any] | None = None) -> int:
+    """Save the bundled review set without replacing a team's own note.
+
+    Existing manual wording wins.  Sending ``-`` in the bot marks an episode
+    as deliberately cleared, so the bundled note is not added back later.
+    """
+    database = get_db()
+    if title is not None:
+        titles = [title] if is_demon_slayer_title(title) else []
+    else:
+        titles = await database.titles.find({"tmdb_type": "tv"}).to_list(length=4000)
+        titles = [item for item in titles if is_demon_slayer_title(item)]
+
+    seeded = 0
+    now = utcnow()
+    for item in titles:
+        title_id = str(item.get("_id") or "")
+        if not title_id:
+            continue
+        for (season, episode), raw_note in DEMON_SLAYER_REVIEW_NOTES.items():
+            note_html = episode_page_note_html(raw_note)
+            if not note_html:
+                continue
+            page_id = episode_page_id(title_id, season, episode)
+            existing_page = await database.episode_pages.find_one(
+                {"_id": page_id},
+                {
+                    "manual_note_removed": 1,
+                    "manual_note_html": 1,
+                    "manual_note": 1,
+                    "manual_note_seed": 1,
+                    "manual_note_by": 1,
+                },
+            )
+            if existing_page:
+                # Keep owner/editor notes and deliberately cleared notes as-is.
+                # For our own bundled notes, repair old unstyled HTML saved by
+                # previous builds so existing episode pages become beautiful
+                # again after a restart.
+                if existing_page.get("manual_note_removed"):
+                    continue
+                current_html = str(existing_page.get("manual_note_html") or "").strip()
+                current_text = str(existing_page.get("manual_note") or "").strip()
+                current_lower = (current_html or current_text).lower()
+                is_seed_note = (
+                    existing_page.get("manual_note_seed") == "demon_slayer_s1_initial_reviews"
+                    or (
+                        not existing_page.get("manual_note_by")
+                        and "demon slayer" in current_lower
+                        and f"episode {episode:02d}" in current_lower
+                        and "/ 10" in current_lower
+                    )
+                )
+                if current_html or current_text:
+                    if is_seed_note and current_html != note_html:
+                        await database.episode_pages.update_one(
+                            {"_id": page_id},
+                            {"$set": {"manual_note_html": note_html, "updated_at": now}},
+                        )
+                        seeded += 1
+                    continue
+
+            seed_filter = {
+                "_id": page_id,
+                "manual_note_removed": {"$ne": True},
+                "$and": [
+                    {"$or": [{"manual_note_html": {"$exists": False}}, {"manual_note_html": None}, {"manual_note_html": ""}]},
+                    {"$or": [{"manual_note": {"$exists": False}}, {"manual_note": None}, {"manual_note": ""}]},
+                ],
+            }
+            seed_update = {
+                "$set": {
+                    "title_id": item.get("_id"),
+                    "season": season,
+                    "episode": episode,
+                    "tmdb_id": item.get("tmdb_id"),
+                    "manual_note_html": note_html,
+                    "manual_note_seed": "demon_slayer_s1_initial_reviews",
+                    "updated_at": now,
+                },
+                "$setOnInsert": {"created_at": now, "tmdb_checked_at": None},
+            }
+            try:
+                result = await database.episode_pages.update_one(
+                    seed_filter,
+                    seed_update,
+                    # Only create a new page if it does not already exist.  If
+                    # an existing page has a custom/manual note, using upsert=True
+                    # with a filtered query can try to insert the same _id again
+                    # and raise E11000 duplicate key errors.
+                    upsert=existing_page is None,
+                )
+            except DuplicateKeyError:
+                logger.debug("Demon Slayer review seed skipped duplicate page %s", page_id)
+                continue
+            if result.modified_count or result.upserted_id:
+                seeded += 1
+    if seeded:
+        logger.info("Saved %s Demon Slayer episode review note(s).", seeded)
+    return seeded
 
 
 async def episode_page_data(title: dict[str, Any], season: int, episode: int) -> dict[str, Any]:
@@ -453,6 +665,10 @@ async def episode_page_data(title: dict[str, Any], season: int, episode: int) ->
         )
         cached = await database.episode_pages.find_one({"_id": page_id}) or cached
 
+    manual_note_html = episode_page_note_html(cached.get("manual_note_html") or cached.get("manual_note"))
+    if not manual_note_html and not cached.get("manual_note_removed"):
+        manual_note_html = default_episode_review_note_html(title, season, episode)
+
     return {
         "season": int(cached.get("season") or season),
         "number": int(cached.get("episode") or episode),
@@ -464,7 +680,7 @@ async def episode_page_data(title: dict[str, Any], season: int, episode: int) ->
         "airDate": cached.get("air_date") or "",
         "rating": float(cached.get("rating") or 0),
         "runtime": int(cached.get("runtime") or 0),
-        "manualNoteHtml": episode_page_note_html(cached.get("manual_note_html") or cached.get("manual_note")),
+        "manualNoteHtml": manual_note_html,
     }
 
 
@@ -473,6 +689,7 @@ async def save_episode_page_note(
 ) -> None:
     """Persist the optional note set from the Telegram subtitle draft."""
     now = utcnow()
+    note_html = episode_page_note_html(note)
     await get_db().episode_pages.update_one(
         {"_id": episode_page_id(str(title["_id"]), season, episode)},
         {
@@ -481,7 +698,9 @@ async def save_episode_page_note(
                 "season": int(season),
                 "episode": int(episode),
                 "tmdb_id": title.get("tmdb_id"),
-                "manual_note_html": episode_page_note_html(note),
+                "manual_note_html": note_html,
+                "manual_note_removed": not bool(note_html),
+                "manual_note_seed": "" if note_html else "removed_by_editor",
                 "manual_note_updated_at": now,
                 "manual_note_by": member.get("_id"),
                 "updated_at": now,
@@ -621,7 +840,10 @@ async def ensure_title(tmdb_info: dict[str, Any] | None, fallback_name: str) -> 
             {"$set": document, "$setOnInsert": {"created_at": utcnow(), "subtitle_count": 0, "download_count": 0}},
             upsert=True,
         )
-        return await database.titles.find_one({"_id": title_id})
+        stored_title = await database.titles.find_one({"_id": title_id})
+        if is_demon_slayer_title(stored_title):
+            await seed_demon_slayer_episode_reviews(stored_title)
+        return stored_title
 
     title_id = new_id("manual_")
     document = {
@@ -858,7 +1080,16 @@ async def require_bot_member(message_or_callback: Any) -> dict[str, Any] | None:
     if member:
         return member
     chat_id = getattr(getattr(message, "chat", None), "id", None)
-    if chat_id:
+    sender = getattr(message_or_callback, "from_user", None) or getattr(message, "from_user", None)
+    sender_id = str(getattr(sender, "id", "") or "")
+    if chat_id and sender_id:
+        await send_single_menu(
+            sender_id,
+            chat_id,
+            "<b>Member access required</b>\n\nAsk an owner to add your public Telegram username, then send <code>/start</code> again.",
+            owner_contact_keyboard(),
+        )
+    elif chat_id:
         await tg.send_text(
             chat_id,
             "<b>Member access required</b>\n\nAsk an owner to add your public Telegram username, then send <code>/start</code> again.",
@@ -908,6 +1139,98 @@ def owner_contact_keyboard() -> InlineKeyboardMarkup:
         [[InlineKeyboardButton("👤 Contact Owner", url="https://t.me/soloRider_DC2")]]
     )
 
+
+MENU_SESSION_TTL = timedelta(days=7)
+
+
+def menu_rows(rows: list[list[InlineKeyboardButton]], *, home: bool = False, close: bool = True) -> list[list[InlineKeyboardButton]]:
+    """Append consistent navigation controls to Telegram menu cards."""
+    final_rows = [list(row) for row in rows]
+    footer: list[InlineKeyboardButton] = []
+    if home:
+        footer.append(pick_button("🏠 Menu", "h:menu"))
+    if close:
+        footer.append(pick_button("✖ Close", "h:close"))
+    if footer:
+        final_rows.append(footer)
+    return final_rows
+
+
+async def _stored_menu_message_id(user_id: str, chat_id: int) -> int | None:
+    record = await get_db().bot_menu_sessions.find_one(
+        {"user_id": str(user_id), "chat_id": str(chat_id), "expires_at": {"$gt": utcnow()}}
+    )
+    try:
+        return int(record.get("message_id")) if record else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+async def remember_menu_session(user_id: str, chat_id: int, message_id: int) -> None:
+    await get_db().bot_menu_sessions.update_one(
+        {"user_id": str(user_id), "chat_id": str(chat_id)},
+        {
+            "$set": {
+                "user_id": str(user_id),
+                "chat_id": str(chat_id),
+                "message_id": int(message_id),
+                "updated_at": utcnow(),
+                "expires_at": utcnow() + MENU_SESSION_TTL,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def close_menu_session(user_id: str, chat_id: int, current_message_id: int | None = None, *, delete_message: bool = True) -> None:
+    """Forget a user's active menu and optionally delete the visible Telegram cards."""
+    message_ids: set[int] = set()
+    stored_id = await _stored_menu_message_id(user_id, chat_id)
+    if stored_id:
+        message_ids.add(stored_id)
+    if current_message_id:
+        try:
+            message_ids.add(int(current_message_id))
+        except (TypeError, ValueError):
+            pass
+    if delete_message:
+        for message_id in sorted(message_ids):
+            try:
+                await tg.require().delete_messages(chat_id, message_id)
+            except Exception:
+                pass
+    await get_db().bot_menu_sessions.delete_one({"user_id": str(user_id), "chat_id": str(chat_id)})
+
+
+async def send_single_menu(
+    user_id: str,
+    chat_id: int,
+    text: str,
+    keyboard: InlineKeyboardMarkup | None = None,
+    *,
+    previous_message_id: int | None = None,
+    delete_old: bool = True,
+) -> Message:
+    """Show exactly one active menu card per user.
+
+    Opening another menu removes the older menu card, while normal draft/action
+    state is kept unless the user taps Close or runs /cancel.
+    """
+    stored_id = await _stored_menu_message_id(user_id, chat_id) if delete_old else None
+    try:
+        given_id = int(previous_message_id) if previous_message_id else None
+    except (TypeError, ValueError):
+        given_id = None
+    replace_id = given_id or stored_id
+    message = await tg.replace_card(chat_id, text, keyboard, previous_message_id=replace_id) if replace_id else await tg.send_text(chat_id, text, keyboard)
+    if delete_old and stored_id and stored_id != replace_id and stored_id != int(message.id):
+        try:
+            await tg.require().delete_messages(chat_id, stored_id)
+        except Exception:
+            pass
+    await remember_menu_session(user_id, chat_id, int(message.id))
+    return message
+
 def draft_is_series(draft: dict[str, Any]) -> bool:
     """Detect TV drafts from the selected TMDB type or parsed episode details."""
     selected = draft.get("selected_tmdb") or {}
@@ -948,11 +1271,11 @@ def draft_keyboard(draft: dict[str, Any]) -> InlineKeyboardMarkup:
         for index, value in enumerate(resolution_choices)
     ]
     confirm_label = "💾 Save changes" if draft.get("mode") == "edit" else "🚀 Send to channel"
-    controls = [pick_button("✎ Edit release note" if draft.get("note") else "＋ Release note", f"d:{key}:note")]
+    controls = [pick_button(("✓ " if draft.get("note") else "＋ ") + "Release note", f"d:{key}:note")]
     if selected.get("tmdb_type") == "movie":
-        controls.append(pick_button("✎ Website card note" if draft.get("title_note_html") else "＋ Website card note", f"d:{key}:pagenote"))
+        controls.append(pick_button(("✓ " if draft.get("title_note_html") else "＋ ") + "Website card note", f"d:{key}:pagenote"))
     elif draft.get("season") and draft.get("episode"):
-        controls.append(pick_button("✎ Episode page note" if draft.get("episode_note_touched") else "＋ Episode page note", f"d:{key}:epnote"))
+        controls.append(pick_button(("✓ " if draft.get("episode_note") else "＋ ") + "Episode page note", f"d:{key}:epnote"))
     controls.append(pick_button("🔎 Change title", f"d:{key}:retitle"))
     control_rows = [controls[:2], controls[2:]] if len(controls) > 2 else [controls]
     return InlineKeyboardMarkup(
@@ -1048,10 +1371,22 @@ async def show_tmdb_results(draft: dict[str, Any], kind: str, previous_message_i
     try:
         results = await tmdb_search(query, effective_kind, expected_kind=expected_kind)
     except TMDBError as error:
-        await tg.send_text(int(draft["chat_id"]), f"<b>TMDB search failed</b>\n{html.escape(str(error))}")
+        await send_single_menu(
+            str(draft.get("user_id") or ""),
+            int(draft["chat_id"]),
+            f"<b>TMDB search failed</b>\n{html.escape(str(error))}",
+            InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+            previous_message_id=previous_message_id or draft.get("ui_message_id"),
+        )
         return
     if not results:
-        await tg.send_text(int(draft["chat_id"]), "No TMDB results found. Choose <b>Change title search</b> and try a shorter exact name.")
+        await send_single_menu(
+            str(draft.get("user_id") or ""),
+            int(draft["chat_id"]),
+            "No TMDB results found. Choose <b>Change title search</b> and try a shorter exact name.",
+            InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+            previous_message_id=previous_message_id or draft.get("ui_message_id"),
+        )
         return
     await get_db().bot_drafts.update_one(
         {"_id": draft["_id"]},
@@ -1136,13 +1471,24 @@ def saved_channel_keyboard(subtitle: dict[str, Any], title: dict[str, Any]) -> I
 async def create_new_draft(message: Message, member: dict[str, Any]) -> None:
     document = message.document
     filename = document.file_name or "subtitle.srt"
+    user_id = str(message.from_user.id)
     if not valid_subtitle_filename(filename):
         extensions = ", ".join(sorted(ALLOWED_EXTENSIONS))
-        await message.reply_text(f"Send only subtitle files: <code>{extensions}</code>", parse_mode="html")
+        await send_single_menu(
+            user_id,
+            int(message.chat.id),
+            f"<b>Unsupported file.</b>\n\nSend only subtitle files: <code>{extensions}</code>",
+            InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+        )
         return
     guess = parse_subtitle_name(filename, message.caption or "")
-    user_id = str(message.from_user.id)
     await get_db().bot_drafts.delete_many({"user_id": user_id, "mode": "new"})
+    # Try to auto-match the title from the filename first, the same confident
+    # matcher used for direct channel imports. When it finds one, the draft
+    # opens straight on the "READY TO PUBLISH" card instead of making the
+    # uploader search and pick manually. If nothing confident is found, this
+    # stays None and the existing manual search/pick flow below is unchanged.
+    auto_selected = await auto_tmdb_match(guess.title_guess, bool(guess.season))
     draft = {
         "_id": new_id("draft_"),
         "draft_key": draft_id(),
@@ -1170,7 +1516,7 @@ async def create_new_draft(message: Message, member: dict[str, Any]) -> None:
         "title_note_touched": False,
         "episode_note": "",
         "episode_note_touched": False,
-        "selected_tmdb": None,
+        "selected_tmdb": auto_selected,
         "tmdb_results": [],
         "ui_message_id": None,
         "created_at": utcnow(),
@@ -1279,7 +1625,13 @@ async def publish_new_draft(draft: dict[str, Any], member: dict[str, Any], callb
         )
     except TelegramStorageError as error:
         await tg.answer(callback, "Telegram storage failed. Retry after checking channel access.", alert=True)
-        await tg.send_text(int(draft["chat_id"]), f"<b>Could not send to the channel.</b>\n{html.escape(str(error))}\n\nYour draft is kept. Tap <b>Send to channel</b> again.")
+        await send_single_menu(
+            str(callback.from_user.id),
+            int(draft["chat_id"]),
+            f"<b>Could not send to the channel.</b>\n{html.escape(str(error))}\n\nYour draft is kept. Tap <b>Send to channel</b> again.",
+            draft_keyboard(draft),
+            previous_message_id=callback.message.id,
+        )
         return
     except Exception:
         logger.exception("Bot publish failed")
@@ -1302,7 +1654,7 @@ async def publish_new_draft(draft: dict[str, Any], member: dict[str, Any], callb
         f"👤 Saved as {html.escape(member_display(member))}\n\n"
         "The file is now stored in the subtitle channel and visible on the website."
     )
-    await tg.replace_card(int(draft["chat_id"]), text, previous_message_id=getattr(callback.message, "id", None))
+    await send_single_menu(str(draft["user_id"]), int(draft["chat_id"]), text, InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=getattr(callback.message, "id", None))
     logger.info("Published bot subtitle: %s (%s)", draft["filename"], (record or {}).get("_id", "stored"))
 
 
@@ -1319,18 +1671,12 @@ async def save_edit_draft(draft: dict[str, Any], member: dict[str, Any], callbac
         await tg.answer(callback, "You can edit only your own files.", alert=True)
         return
     title = await ensure_title(selected, selected.get("name") or "Untitled")
-    caption = channel_caption(
-        {**draft, "selected_tmdb": selected},
-        await get_db().members.find_one({"_id": subtitle.get("uploader_id")}) or member,
-    )
-    page_keyboard = channel_page_keyboard(selected, draft.get("season"), draft.get("episode"))
-    try:
-        await tg.edit_channel_caption(int(subtitle["message_id"]), caption, page_keyboard)
-    except TelegramStorageError as error:
-        await tg.answer(callback, "Telegram caption update failed.", alert=True)
-        await tg.send_text(int(draft["chat_id"]), f"<b>Could not update channel details.</b>\n{html.escape(str(error))}")
-        return
 
+    # Save the website record, release note and page/episode note first.
+    # None of this needs Telegram MTProto access to the channel, so a
+    # temporary MTProto/channel-peer failure must never block these edits
+    # from being saved — only the channel caption refresh below is allowed
+    # to fail independently.
     old_title_id = subtitle.get("title_id")
     await get_db().subtitles.update_one(
         {"_id": subtitle["_id"]},
@@ -1359,8 +1705,31 @@ async def save_edit_draft(draft: dict[str, Any], member: dict[str, Any], callbac
     await save_draft_episode_note(draft, title, member)
     await get_db().bot_drafts.delete_one({"_id": draft["_id"]})
     await clear_state(draft["user_id"])
-    text = f"<b>FILE UPDATED</b>\n\n🎬 <b>{html.escape(selected['name'])}</b>\n📁 {html.escape(subtitle['filename'])}\n\nThe website and channel caption now use the corrected details."
-    await tg.replace_card(int(draft["chat_id"]), text, previous_message_id=getattr(callback.message, "id", None))
+
+    # Best-effort channel caption refresh. If this fails, the website and
+    # notes are already saved; only the channel post text is stale, and it
+    # can be retried any time from the file's "Refresh channel button".
+    caption = channel_caption(
+        {**draft, "selected_tmdb": selected},
+        await get_db().members.find_one({"_id": subtitle.get("uploader_id")}) or member,
+    )
+    page_keyboard = channel_page_keyboard(selected, draft.get("season"), draft.get("episode"))
+    channel_warning = ""
+    try:
+        await tg.edit_channel_caption(int(subtitle["message_id"]), caption, page_keyboard)
+    except TelegramStorageError as error:
+        channel_warning = (
+            "\n\n⚠️ <b>The channel post could not be refreshed:</b>\n"
+            f"{html.escape(str(error))}\n"
+            "Use <b>Refresh channel button</b> from this file's edit menu once Telegram storage is reachable."
+        )
+
+    text = (
+        f"<b>FILE UPDATED</b>\n\n🎬 <b>{html.escape(selected['name'])}</b>\n📁 {html.escape(subtitle['filename'])}\n\n"
+        "The website and saved notes now use the corrected details."
+        f"{channel_warning}"
+    )
+    await send_single_menu(str(draft["user_id"]), int(draft["chat_id"]), text, InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=getattr(callback.message, "id", None))
 
 
 def can_manage_subtitle(member: dict[str, Any], subtitle: dict[str, Any]) -> bool:
@@ -1387,6 +1756,20 @@ def subtitle_file_card_text(subtitle: dict[str, Any], title: dict[str, Any] | No
     )
 
 
+def file_card_back_target(subtitle: dict[str, Any], title: dict[str, Any] | None, scope: str) -> str:
+    """Route the file-card Back button to the exact drill-down screen it came from.
+
+    Series episodes go back to that episode's file list; movies (and any
+    file without a matched title) go back to the title's file list.
+    """
+    title_id = str((title or {}).get("_id") or subtitle.get("title_id") or "")
+    if not title_id:
+        return f"f:list:{scope}"
+    if (title or {}).get("tmdb_type") == "tv" and subtitle.get("season") and subtitle.get("episode"):
+        return f"f:ep:{title_id}:{int(subtitle['season'])}:{int(subtitle['episode'])}:{scope}"
+    return f"f:title:{title_id}:{scope}"
+
+
 async def show_subtitle_file_card(callback: CallbackQuery, member: dict[str, Any], subtitle_id: str, scope: str = "mine") -> None:
     subtitle = await get_db().subtitles.find_one({"_id": subtitle_id})
     if not subtitle:
@@ -1396,7 +1779,7 @@ async def show_subtitle_file_card(callback: CallbackQuery, member: dict[str, Any
         await tg.answer(callback, "You can manage only your own files.", alert=True)
         return
     title = await get_db().titles.find_one({"_id": subtitle.get("title_id")})
-    back = f"f:list:{scope}"
+    back = file_card_back_target(subtitle, title, scope)
     rows = [
         [pick_button("✎ Edit details", f"f:edit:{subtitle['_id']}:{scope}")],
         [pick_button("🔗 Refresh channel button", f"f:refresh:{subtitle['_id']}:{scope}")],
@@ -1404,7 +1787,9 @@ async def show_subtitle_file_card(callback: CallbackQuery, member: dict[str, Any
         [pick_button("← Back to files", back)],
     ]
     await tg.answer(callback)
-    await tg.replace_card(
+    rows = menu_rows(rows, home=True, close=True)
+    await send_single_menu(
+        str(callback.from_user.id),
         int(callback.message.chat.id),
         subtitle_file_card_text(subtitle, title),
         InlineKeyboardMarkup(rows),
@@ -1437,14 +1822,21 @@ async def refresh_existing_channel_button(callback: CallbackQuery, member: dict[
         await tg.edit_channel_caption(message_id, saved_channel_caption(subtitle, title), keyboard)
     except TelegramStorageError as error:
         await tg.answer(callback, "Channel update failed.", alert=True)
-        await tg.send_text(int(callback.message.chat.id), f"<b>Could not refresh the channel post.</b>\n{html.escape(str(error))}")
+        await send_single_menu(
+            str(callback.from_user.id),
+            int(callback.message.chat.id),
+            f"<b>Could not refresh the channel post.</b>\n{html.escape(str(error))}",
+            InlineKeyboardMarkup(menu_rows([[pick_button("← Back to file", f"f:view:{subtitle['_id']}:{scope}")]], home=True, close=True)),
+            previous_message_id=callback.message.id,
+        )
         return
     await tg.answer(callback, "Channel button refreshed.")
-    await tg.replace_card(
+    await send_single_menu(
+        str(callback.from_user.id),
         int(callback.message.chat.id),
         "<b>CHANNEL BUTTON UPDATED</b>\n\n"
         "The old duplicate buttons were replaced with one page button. It opens the movie page or exact episode page with its available subtitle files.",
-        InlineKeyboardMarkup([[pick_button("← Back to file", f"f:view:{subtitle['_id']}:{scope}")]]),
+        InlineKeyboardMarkup(menu_rows([[pick_button("← Back to file", f"f:view:{subtitle['_id']}:{scope}")]], home=True, close=True)),
         previous_message_id=callback.message.id,
     )
 
@@ -1469,7 +1861,9 @@ async def show_subtitle_delete_confirmation(callback: CallbackQuery, member: dic
         [pick_button("← Keep this subtitle", f"f:view:{subtitle['_id']}:{scope}")],
     ]
     await tg.answer(callback)
-    await tg.replace_card(
+    rows = menu_rows(rows, home=True, close=True)
+    await send_single_menu(
+        str(callback.from_user.id),
         int(callback.message.chat.id),
         text,
         InlineKeyboardMarkup(rows),
@@ -1485,6 +1879,8 @@ async def delete_existing_subtitle(callback: CallbackQuery, member: dict[str, An
     if not can_manage_subtitle(member, subtitle):
         await tg.answer(callback, "You can delete only your own files.", alert=True)
         return
+    title = await get_db().titles.find_one({"_id": subtitle.get("title_id")})
+    back = file_card_back_target(subtitle, title, scope)
 
     message_id = int(subtitle.get("message_id") or 0)
     if message_id:
@@ -1492,9 +1888,12 @@ async def delete_existing_subtitle(callback: CallbackQuery, member: dict[str, An
             await tg.delete_channel_message(message_id)
         except TelegramStorageError as error:
             await tg.answer(callback, "Channel delete failed.", alert=True)
-            await tg.send_text(
+            await send_single_menu(
+                str(callback.from_user.id),
                 int(callback.message.chat.id),
                 f"<b>Subtitle was not deleted.</b>\n\nTelegram storage must delete the channel post first.\n{html.escape(str(error))}",
+                InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                previous_message_id=callback.message.id,
             )
             return
 
@@ -1506,12 +1905,13 @@ async def delete_existing_subtitle(callback: CallbackQuery, member: dict[str, An
 
     filename = html.escape(str(subtitle.get("filename") or "subtitle.srt"))
     await tg.answer(callback, "Subtitle deleted.")
-    await tg.replace_card(
+    await send_single_menu(
+        str(callback.from_user.id),
         int(callback.message.chat.id),
         "<b>SUBTITLE DELETED</b>\n\n"
         f"🗑 {filename}\n\n"
         "The file was removed from the storage channel and is no longer available on the website.",
-        InlineKeyboardMarkup([[pick_button("📚 Team library" if scope == "team" else "🗂 My files", f"f:list:{scope}")]]),
+        InlineKeyboardMarkup(menu_rows([[pick_button("← Continue browsing", back)]], home=True, close=True)),
         previous_message_id=callback.message.id,
     )
 
@@ -1521,32 +1921,142 @@ async def show_my_files(
     member: dict[str, Any],
     all_files: bool = False,
     previous_message_id: int | None = None,
+    *,
+    user_id: str = "",
 ) -> None:
+    """Level 1: every title with at least one of this user's (or the team's) files.
+
+    Tapping a title drills into its episodes for a series, or its files
+    directly for a movie: Series → Episode → Edit menu, instead of one long
+    flat list mixing every subtitle file together.
+    """
+    session_user = str(user_id or member.get("telegram_id") or "")
     query: dict[str, Any] = {} if all_files else {"uploader_id": member["_id"]}
-    records = await get_db().subtitles.find(query).sort("updated_at", -1).to_list(length=12)
+    records = await get_db().subtitles.find(query, {"title_id": 1, "status": 1}).sort("updated_at", -1).to_list(length=2000)
     if not records:
         message = "<b>NO FILES YET</b>\n\nSend an <code>.srt</code>, <code>.ass</code>, <code>.vtt</code>, or <code>.zip</code> file here to publish your first subtitle."
-        if previous_message_id:
-            await tg.replace_card(chat_id, message, previous_message_id=previous_message_id)
+        keyboard = InlineKeyboardMarkup(menu_rows([[pick_button("➕ Submit subtitle", "h:submit")]], home=True, close=True))
+        if session_user:
+            await send_single_menu(session_user, chat_id, message, keyboard, previous_message_id=previous_message_id)
+        elif previous_message_id:
+            await tg.replace_card(chat_id, message, keyboard, previous_message_id=previous_message_id)
         else:
-            await tg.send_text(chat_id, message)
+            await tg.send_text(chat_id, message, keyboard)
         return
-    title_ids = [item.get("title_id") for item in records]
-    titles = {item["_id"]: item for item in await get_db().titles.find({"_id": {"$in": title_ids}}).to_list(length=30)}
-    rows: list[list[InlineKeyboardButton]] = []
+
+    order: list[str] = []
+    needs_review: dict[str, bool] = {}
     for item in records:
-        title = titles.get(item.get("title_id"), {})
-        label = f"{'⚠️' if item.get('status') != 'published' else '📝'} {title.get('name') or item.get('filename')[:28]}"
-        scope = "team" if all_files else "mine"
-        rows.append([pick_button(label[:58], f"f:view:{item['_id']}:{scope}")])
+        title_id = str(item.get("title_id") or "")
+        if not title_id:
+            continue
+        if title_id not in needs_review:
+            order.append(title_id)
+            needs_review[title_id] = False
+        if item.get("status") != "published":
+            needs_review[title_id] = True
+
+    titles = {item["_id"]: item for item in await get_db().titles.find({"_id": {"$in": order}}).to_list(length=max(len(order), 1))}
+    scope = "team" if all_files else "mine"
+    rows: list[list[InlineKeyboardButton]] = []
+    for title_id in order[:80]:
+        title = titles.get(title_id, {})
+        icon = "⚠️" if needs_review.get(title_id) else ("🎬" if title.get("tmdb_type") == "movie" else "📺")
+        label = f"{icon} {title.get('name') or 'Untitled'}"
+        rows.append([pick_button(label[:58], f"f:title:{title_id}:{scope}")])
     rows.append([pick_button("➕ Submit a subtitle", "h:submit")])
+    rows = menu_rows(rows, home=True, close=True)
     head = "TEAM LIBRARY" if all_files else "MY SUBTITLES"
-    text = f"<b>{head}</b>\n\nChoose an existing subtitle to edit its details or delete it permanently."
+    text = f"<b>{head}</b>\n\nChoose a title, then an episode for a series, to edit or delete a subtitle file."
     keyboard = InlineKeyboardMarkup(rows)
-    if previous_message_id:
+    if session_user:
+        await send_single_menu(session_user, chat_id, text, keyboard, previous_message_id=previous_message_id)
+    elif previous_message_id:
         await tg.replace_card(chat_id, text, keyboard, previous_message_id=previous_message_id)
     else:
         await tg.send_text(chat_id, text, keyboard)
+
+
+async def show_title_files(callback: CallbackQuery, member: dict[str, Any], title_id: str, scope: str) -> None:
+    """Level 2: this title's episodes (series) or files directly (movie)."""
+    title = await get_db().titles.find_one({"_id": title_id})
+    query: dict[str, Any] = {"title_id": title_id}
+    if scope != "team":
+        query["uploader_id"] = member["_id"]
+    records = await get_db().subtitles.find(query).sort("updated_at", -1).to_list(length=600)
+    if not records:
+        await tg.answer(callback, "No files found for this title anymore.", alert=True)
+        await show_my_files(
+            int(callback.message.chat.id), member, all_files=scope == "team",
+            previous_message_id=callback.message.id, user_id=str(callback.from_user.id),
+        )
+        return
+
+    episodes = title_episode_groups(records)
+    flat = [item for item in records if not subtitle_episode_targets(item)]
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for entry in episodes[:60]:
+        count_suffix = f" · {entry['fileCount']} files" if entry["fileCount"] > 1 else ""
+        label = f"📺 {entry['slug'].upper()}{count_suffix}"
+        rows.append([pick_button(label[:58], f"f:ep:{title_id}:{entry['season']}:{entry['episode']}:{scope}")])
+    for item in flat[:30]:
+        icon = "⚠️" if item.get("status") != "published" else "📁"
+        label = f"{icon} {item.get('filename') or 'subtitle'}"
+        rows.append([pick_button(label[:58], f"f:view:{item['_id']}:{scope}")])
+
+    rows.append([pick_button("← Back to titles", f"f:list:{scope}")])
+    await tg.answer(callback)
+    rows = menu_rows(rows, home=True, close=True)
+    name = html.escape((title or {}).get("name") or "Untitled")
+    kind_line = "Choose an episode to see its subtitle file(s)." if episodes else "Choose a file to edit or delete it."
+    text = f"<b>{name}</b>\n\n{kind_line}"
+    await send_single_menu(
+        str(callback.from_user.id),
+        int(callback.message.chat.id),
+        text,
+        InlineKeyboardMarkup(rows),
+        previous_message_id=callback.message.id,
+    )
+
+
+async def show_episode_files(
+    callback: CallbackQuery, member: dict[str, Any], title_id: str, season: int, episode: int, scope: str
+) -> None:
+    """Level 3: the file(s) for one exact episode.
+
+    Jumps straight into the edit menu when there is only one file, which is
+    the common case, so the flow is exactly Series -> Episode -> Edit menu.
+    """
+    query: dict[str, Any] = {"title_id": title_id}
+    if scope != "team":
+        query["uploader_id"] = member["_id"]
+    records = await get_db().subtitles.find(query).sort("updated_at", -1).to_list(length=600)
+    matches = [item for item in records if subtitle_matches_episode(item, season, episode)]
+    if not matches:
+        await tg.answer(callback, "No files found for this episode anymore.", alert=True)
+        await show_title_files(callback, member, title_id, scope)
+        return
+    if len(matches) == 1:
+        await show_subtitle_file_card(callback, member, str(matches[0]["_id"]), scope)
+        return
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in matches[:20]:
+        icon = "⚠️" if item.get("status") != "published" else "📁"
+        label = f"{icon} {item.get('filename') or 'subtitle'}"
+        rows.append([pick_button(label[:58], f"f:view:{item['_id']}:{scope}")])
+    rows.append([pick_button("← Back to episodes", f"f:title:{title_id}:{scope}")])
+    await tg.answer(callback)
+    rows = menu_rows(rows, home=True, close=True)
+    text = f"<b>{episode_slug(season, episode).upper()}</b>\n\nMultiple files exist for this episode. Choose which one to edit or delete."
+    await send_single_menu(
+        str(callback.from_user.id),
+        int(callback.message.chat.id),
+        text,
+        InlineKeyboardMarkup(rows),
+        previous_message_id=callback.message.id,
+    )
 
 
 async def open_subtitle_editor(callback: CallbackQuery, member: dict[str, Any], subtitle_id: str) -> None:
@@ -1608,7 +2118,7 @@ async def set_member_custom_name(target: dict[str, Any], raw_name: str) -> dict[
     return updated
 
 
-async def show_members(chat_id: int, previous_message_id: int | None = None) -> None:
+async def show_members(chat_id: int, previous_message_id: int | None = None, *, user_id: str = "") -> None:
     members = await get_db().members.find({}).sort([("role", 1), ("updated_at", -1)]).to_list(length=40)
     rows: list[list[InlineKeyboardButton]] = [[pick_button("➕ Add member", "m:add")]]
     for entry in members:
@@ -1619,8 +2129,11 @@ async def show_members(chat_id: int, previous_message_id: int | None = None) -> 
         if not entry.get("active"):
             name = f"{name} · off"
         rows.append([pick_button(f"{mark} {name}"[:58], f"m:view:{entry['_id']}")])
+    rows = menu_rows(rows, home=True, close=True)
     text = "<b>MEMBER ACCESS</b>\n\nAdd a Telegram username, set a custom public name, change roles, deactivate access, or remove a member."
-    if previous_message_id:
+    if user_id:
+        await send_single_menu(str(user_id), chat_id, text, InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    elif previous_message_id:
         await tg.replace_card(chat_id, text, InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
     else:
         await tg.send_text(chat_id, text, InlineKeyboardMarkup(rows))
@@ -1653,8 +2166,8 @@ async def show_member_card(callback: CallbackQuery, target_id: str) -> None:
                 [pick_button("🗑 Remove member", f"m:remove:{target_id}")],
             ]
         )
-    rows.append([pick_button("← Back", "m:list")])
-    await tg.replace_card(int(callback.message.chat.id), text, InlineKeyboardMarkup(rows), previous_message_id=callback.message.id)
+    rows.append([pick_button("← Back", "m:list"), pick_button("✖ Close", "h:close")])
+    await send_single_menu(str(callback.from_user.id), int(callback.message.chat.id), text, InlineKeyboardMarkup(rows), previous_message_id=callback.message.id)
 
 
 async def show_member_remove_confirmation(callback: CallbackQuery, target_id: str) -> None:
@@ -1671,14 +2184,21 @@ async def show_member_remove_confirmation(callback: CallbackQuery, target_id: st
         f"🗑 <b>{name}</b> will lose access to this bot immediately.\n\n"
         "Their published subtitle files remain available and keep their current credit. This action does not delete subtitle files."
     )
-    rows = [[pick_button("🗑 Yes, remove", f"m:confirmremove:{target_id}"), pick_button("Cancel", f"m:view:{target_id}")]]
-    await tg.replace_card(int(callback.message.chat.id), text, InlineKeyboardMarkup(rows), previous_message_id=callback.message.id)
+    rows = [[pick_button("🗑 Yes, remove", f"m:confirmremove:{target_id}"), pick_button("Cancel", f"m:view:{target_id}")], [pick_button("✖ Close", "h:close")]]
+    await send_single_menu(str(callback.from_user.id), int(callback.message.chat.id), text, InlineKeyboardMarkup(rows), previous_message_id=callback.message.id)
 
 
-async def show_reports(chat_id: int) -> None:
+async def show_reports(chat_id: int, *, user_id: str = "", previous_message_id: int | None = None) -> None:
     reports = await get_db().reports.find({"status": "open"}).sort("created_at", -1).to_list(length=10)
     if not reports:
-        await tg.send_text(chat_id, "<b>NO OPEN REPORTS</b>\n\nViewer reports will appear here when a subtitle needs attention.")
+        text = "<b>NO OPEN REPORTS</b>\n\nViewer reports will appear here when a subtitle needs attention."
+        keyboard = InlineKeyboardMarkup(menu_rows([], home=True, close=True))
+        if user_id:
+            await send_single_menu(str(user_id), chat_id, text, keyboard, previous_message_id=previous_message_id)
+        elif previous_message_id:
+            await tg.replace_card(chat_id, text, keyboard, previous_message_id=previous_message_id)
+        else:
+            await tg.send_text(chat_id, text, keyboard)
         return
     rows: list[list[InlineKeyboardButton]] = []
     text = "<b>OPEN REPORTS</b>\n\n"
@@ -1686,10 +2206,16 @@ async def show_reports(chat_id: int) -> None:
         subtitle = await get_db().subtitles.find_one({"_id": report.get("subtitle_id")}, {"filename": 1})
         text += f"{index}. <b>{html.escape((subtitle or {}).get('filename') or 'Deleted file')}</b>\n{html.escape(report.get('reason') or '')}\n\n"
         rows.append([pick_button(f"✓ Close report {index}", f"r:close:{report['_id']}")])
-    await tg.send_text(chat_id, text[:3900], InlineKeyboardMarkup(rows))
+    rows = menu_rows(rows, home=True, close=True)
+    if user_id:
+        await send_single_menu(str(user_id), chat_id, text[:3900], InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    elif previous_message_id:
+        await tg.replace_card(chat_id, text[:3900], InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    else:
+        await tg.send_text(chat_id, text[:3900], InlineKeyboardMarkup(rows))
 
 
-async def show_ads(chat_id: int) -> None:
+async def show_ads(chat_id: int, *, user_id: str = "", previous_message_id: int | None = None) -> None:
     records = await get_db().settings.find({"type": "ad"}).to_list(length=10)
     by_slot = {record.get("slot"): record for record in records}
     slots = (("site_bar_top", "Top nav bar top"), ("site_bar_bottom", "Top nav bar bottom"), ("home_top", "Home banner"), ("browse_inline", "Browse inline"), ("title_inline", "Title inline"))
@@ -1699,30 +2225,46 @@ async def show_ads(chat_id: int) -> None:
         status = "ON" if by_slot.get(slot, {}).get("enabled") else "OFF"
         lines.append(f"• <b>{label}</b>: {status}")
         rows.append([pick_button(f"✎ {label}", f"a:slot:{slot}"), pick_button(f"{'◉' if status == 'ON' else '○'} Disable", f"a:off:{slot}")])
-    await tg.send_text(chat_id, "\n".join(lines), InlineKeyboardMarkup(rows))
+    rows = menu_rows(rows, home=True, close=True)
+    if user_id:
+        await send_single_menu(str(user_id), chat_id, "\n".join(lines), InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    elif previous_message_id:
+        await tg.replace_card(chat_id, "\n".join(lines), InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    else:
+        await tg.send_text(chat_id, "\n".join(lines), InlineKeyboardMarkup(rows))
 
 
-async def begin_channel_link(chat_id: int, user_id: str) -> None:
+async def begin_channel_link(chat_id: int, user_id: str, previous_message_id: int | None = None) -> None:
     """Start the one-time private-channel peer linking flow for an owner."""
     await save_state(user_id, "channel_connect", {})
-    await tg.send_text(
+    await send_single_menu(
+        user_id,
         chat_id,
         "<b>LINK SUBTITLE STORAGE CHANNEL</b>\n\n"
         "Forward <b>any existing post</b> from your configured subtitle storage channel to this bot now. "
         "Do not copy or re-send it: use Telegram’s <b>Forward</b> action.\n\n"
         "The bot will verify AUTH_CHANNEL, save its private peer safely, and confirm when publishing is ready. "
         "Use <code>/cancel</code> to stop.",
+        InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+        previous_message_id=previous_message_id,
     )
 
 
-async def welcome(chat_id: int, member: dict[str, Any] | None) -> None:
+async def welcome(
+    chat_id: int,
+    member: dict[str, Any] | None,
+    *,
+    user_id: str = "",
+    previous_message_id: int | None = None,
+) -> None:
     bot_heading = html.escape(APP_NAME.upper())
     if not member:
-        await tg.send_text(
-            chat_id,
-            f"<b>{bot_heading}</b>\n\nThis bot is for the subtitle team. Ask an owner to add your public Telegram username, then send <code>/start</code> again.",
-            owner_contact_keyboard(),
-        )
+        rows = [[InlineKeyboardButton("👤 Contact Owner", url="https://t.me/soloRider_DC2")], [pick_button("✖ Close", "h:close")]]
+        text = f"<b>{bot_heading}</b>\n\nThis bot is for the subtitle team. Ask an owner to add your public Telegram username, then send <code>/start</code> again."
+        if user_id:
+            await send_single_menu(str(user_id), chat_id, text, InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+        else:
+            await tg.send_text(chat_id, text, InlineKeyboardMarkup(rows))
         return
     role = role_label(member.get("role", "maker"))
     rows = [
@@ -1734,13 +2276,18 @@ async def welcome(chat_id: int, member: dict[str, Any] | None) -> None:
     if member.get("role") == "owner":
         rows.append([pick_button("👥 Members", "h:members"), pick_button("📣 Website ads", "h:ads")])
         rows.append([pick_button("🔗 Link storage channel", "h:connectchannel")])
+    rows = menu_rows(rows, close=True)
     text = (
         f"<b>{bot_heading}</b>\n\n"
         f"Welcome, <b>{html.escape(member_display(member))}</b>\n"
         f"Role: <b>{role}</b>\n\n"
         "Send a subtitle file here. The bot will show TMDB results and poster, then lets you choose the source, resolution and note before publishing to the channel."
     )
-    await tg.send_text(chat_id, text, InlineKeyboardMarkup(rows))
+    session_user = str(user_id or member.get("telegram_id") or "")
+    if session_user:
+        await send_single_menu(session_user, chat_id, text, InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    else:
+        await tg.send_text(chat_id, text, InlineKeyboardMarkup(rows))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1759,46 +2306,48 @@ async def on_private_command(message: Message) -> None:
     member = await resolve_member_user(message.from_user)
     command = (message.command or ["start"])[0].lower()
     chat_id = int(message.chat.id)
-    if command in {"start", "help"}:
-        await welcome(chat_id, member)
+    user_id = str(message.from_user.id)
+    if command in {"start", "help", "menu"}:
+        await welcome(chat_id, member, user_id=user_id)
         return
     if command == "cancel":
-        await clear_state(str(message.from_user.id))
-        await get_db().bot_drafts.delete_many({"user_id": str(message.from_user.id)})
-        await message.reply_text("Current action cancelled.")
+        await clear_state(user_id)
+        await get_db().bot_drafts.delete_many({"user_id": user_id})
+        await close_menu_session(user_id, chat_id)
+        await send_single_menu(user_id, chat_id, "Current action cancelled.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), delete_old=False)
         return
     if not member:
-        await welcome(chat_id, None)
+        await welcome(chat_id, None, user_id=user_id)
         return
     if command == "submit":
-        await tg.send_text(chat_id, "Send your <code>.srt</code>, <code>.ass</code>, <code>.ssa</code>, <code>.vtt</code>, or <code>.zip</code> file now. I will detect the release details and open the title menu.")
+        await send_single_menu(user_id, chat_id, "Send your <code>.srt</code>, <code>.ass</code>, <code>.ssa</code>, <code>.vtt</code>, or <code>.zip</code> file now. I will detect the release details and open the title menu.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
     elif command == "myfiles":
-        await show_my_files(chat_id, member)
+        await show_my_files(chat_id, member, user_id=user_id)
     elif command == "library":
         if member.get("role") not in {"owner", "editor"}:
-            await tg.send_text(chat_id, "The team library is available to editors and owners. Use <code>/myfiles</code> for your own files.")
+            await send_single_menu(user_id, chat_id, "The team library is available to editors and owners. Use <code>/myfiles</code> for your own files.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await show_my_files(chat_id, member, all_files=True)
+            await show_my_files(chat_id, member, all_files=True, user_id=user_id)
     elif command == "members":
         if member.get("role") != "owner":
-            await tg.send_text(chat_id, "Only owners can manage member access.")
+            await send_single_menu(user_id, chat_id, "Only owners can manage member access.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await show_members(chat_id)
+            await show_members(chat_id, user_id=user_id)
     elif command == "reports":
         if member.get("role") not in {"owner", "editor"}:
-            await tg.send_text(chat_id, "Only editors and owners can review reports.")
+            await send_single_menu(user_id, chat_id, "Only editors and owners can review reports.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await show_reports(chat_id)
+            await show_reports(chat_id, user_id=user_id)
     elif command == "ads":
         if member.get("role") != "owner":
-            await tg.send_text(chat_id, "Only owners can manage website ads.")
+            await send_single_menu(user_id, chat_id, "Only owners can manage website ads.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await show_ads(chat_id)
+            await show_ads(chat_id, user_id=user_id)
     elif command == "connectchannel":
         if member.get("role") != "owner":
-            await tg.send_text(chat_id, "Only owners can link the subtitle storage channel.")
+            await send_single_menu(user_id, chat_id, "Only owners can link the subtitle storage channel.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await begin_channel_link(chat_id, str(message.from_user.id))
+            await begin_channel_link(chat_id, user_id)
 
 
 async def on_private_document(message: Message) -> None:
@@ -1808,13 +2357,13 @@ async def on_private_document(message: Message) -> None:
         linked, detail = await tg.link_channel_from_forward(message)
         if linked:
             await clear_state(user_id)
-            await tg.send_text(int(message.chat.id), f"<b>STORAGE CHANNEL LINKED</b>\n\n{html.escape(detail)}")
+            await send_single_menu(user_id, int(message.chat.id), f"<b>STORAGE CHANNEL LINKED</b>\n\n{html.escape(detail)}", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await tg.send_text(int(message.chat.id), f"<b>Channel link not completed.</b>\n{html.escape(detail)}")
+            await send_single_menu(user_id, int(message.chat.id), f"<b>Channel link not completed.</b>\n{html.escape(detail)}", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         return
     member = await resolve_member_user(message.from_user)
     if not member:
-        await welcome(int(message.chat.id), None)
+        await welcome(int(message.chat.id), None, user_id=user_id)
         return
     await create_new_draft(message, member)
 
@@ -1825,9 +2374,9 @@ async def on_private_text(message: Message) -> None:
     if not state:
         member = await resolve_member_user(message.from_user)
         if member:
-            await tg.send_text(int(message.chat.id), "Use the buttons above or send a subtitle file. Type <code>/help</code> for the team menu.")
+            await send_single_menu(user_id, int(message.chat.id), "Use the buttons above or send a subtitle file. Type <code>/help</code> for the team menu.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
-            await welcome(int(message.chat.id), None)
+            await welcome(int(message.chat.id), None, user_id=user_id)
         return
 
     payload = state.get("payload") or {}
@@ -1835,19 +2384,19 @@ async def on_private_text(message: Message) -> None:
     if state.get("kind") == "channel_connect":
         linked, detail = await tg.link_channel_from_forward(message)
         if linked:
-            await tg.send_text(int(message.chat.id), f"<b>STORAGE CHANNEL LINKED</b>\n\n{html.escape(detail)}")
+            await send_single_menu(user_id, int(message.chat.id), f"<b>STORAGE CHANNEL LINKED</b>\n\n{html.escape(detail)}", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
             await save_state(user_id, "channel_connect", payload)
-            await tg.send_text(int(message.chat.id), f"<b>Channel link not completed.</b>\n{html.escape(detail)}")
+            await send_single_menu(user_id, int(message.chat.id), f"<b>Channel link not completed.</b>\n{html.escape(detail)}", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         return
     if state.get("kind") == "draft_query":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
         if not draft:
-            await tg.send_text(int(message.chat.id), "That submission expired. Send the subtitle file again.")
+            await send_single_menu(user_id, int(message.chat.id), "That submission expired. Send the subtitle file again.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
             return
         clean = re.sub(r"\s+", " ", text)[:120]
         if len(clean) < 2:
-            await tg.send_text(int(message.chat.id), "Send at least two characters for the title search.")
+            await send_single_menu(user_id, int(message.chat.id), "Send at least two characters for the title search.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=draft.get("ui_message_id"))
             await save_state(user_id, "draft_query", payload)
             return
         await get_db().bot_drafts.update_one({"_id": draft["_id"]}, {"$set": {"title_query": clean, "selected_tmdb": None, "updated_at": utcnow()}})
@@ -1857,10 +2406,11 @@ async def on_private_text(message: Message) -> None:
     if state.get("kind") == "draft_note":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
         if not draft:
-            await tg.send_text(int(message.chat.id), "That submission expired. Send the subtitle file again.")
+            await send_single_menu(user_id, int(message.chat.id), "That submission expired. Send the subtitle file again.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
             return
         note = re.sub(r"\s+", " ", text)[:800]
-        if note in {"-", "skip", "Skip"}:
+        removed = note in {"-", "skip", "Skip"}
+        if removed:
             note = ""
         await get_db().bot_drafts.update_one({"_id": draft["_id"]}, {"$set": {"note": note, "updated_at": utcnow()}})
         await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}))
@@ -1868,16 +2418,17 @@ async def on_private_text(message: Message) -> None:
     if state.get("kind") == "draft_title_note":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
         if not draft:
-            await tg.send_text(int(message.chat.id), "That submission expired. Send the subtitle file again.")
+            await send_single_menu(user_id, int(message.chat.id), "That submission expired. Send the subtitle file again.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
             return
         if (draft.get("selected_tmdb") or {}).get("tmdb_type") != "movie":
-            await tg.send_text(int(message.chat.id), "Website card notes are available for movies only. Add a note from the individual series episode instead.")
+            await send_single_menu(user_id, int(message.chat.id), "Website card notes are available for movies only. Add a note from the individual series episode instead.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=draft.get("ui_message_id"))
             return
         raw_note = text.strip()
-        note_html = "" if raw_note.lower() in {"-", "skip"} else title_page_note_html(raw_note)
-        if raw_note and not note_html:
+        removed = raw_note.lower() in {"-", "skip"}
+        note_html = "" if removed else title_page_note_html(raw_note)
+        if raw_note and not removed and not note_html:
             await save_state(user_id, "draft_title_note", payload)
-            await tg.send_text(int(message.chat.id), "That note had no supported text, image or link. Send normal text or safe HTML, or use <code>-</code> to clear it.")
+            await send_single_menu(user_id, int(message.chat.id), "That note had no supported text, image or link. Send normal text or safe HTML, or use <code>-</code> to clear it.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=draft.get("ui_message_id"))
             return
         await get_db().bot_drafts.update_one(
             {"_id": draft["_id"]},
@@ -1888,13 +2439,14 @@ async def on_private_text(message: Message) -> None:
     if state.get("kind") == "draft_episode_note":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
         if not draft:
-            await tg.send_text(int(message.chat.id), "That submission expired. Send the subtitle file again.")
+            await send_single_menu(user_id, int(message.chat.id), "That submission expired. Send the subtitle file again.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
             return
         raw_note = text.strip()
-        note_html = "" if raw_note.lower() in {"-", "skip"} else episode_page_note_html(raw_note)
-        if raw_note and not note_html:
+        removed = raw_note.lower() in {"-", "skip"}
+        note_html = "" if removed else episode_page_note_html(raw_note)
+        if raw_note and not removed and not note_html:
             await save_state(user_id, "draft_episode_note", payload)
-            await tg.send_text(int(message.chat.id), "That episode note had no supported text, image or link. Send normal text or safe HTML, or use <code>-</code> to clear it.")
+            await send_single_menu(user_id, int(message.chat.id), "That episode note had no supported text, image or link. Send normal text or safe HTML, or use <code>-</code> to clear it.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=draft.get("ui_message_id"))
             return
         await get_db().bot_drafts.update_one(
             {"_id": draft["_id"]},
@@ -1905,11 +2457,11 @@ async def on_private_text(message: Message) -> None:
     if state.get("kind") == "ad_code":
         owner = await resolve_member_user(message.from_user)
         if not owner or owner.get("role") != "owner":
-            await tg.send_text(int(message.chat.id), "Owner access is required.")
+            await send_single_menu(user_id, int(message.chat.id), "Owner access is required.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         slot = str(payload.get("slot") or "")
         if slot not in {"site_bar_top", "site_bar_bottom", "home_top", "browse_inline", "title_inline"}:
-            await tg.send_text(int(message.chat.id), "That ad placement is unavailable.")
+            await send_single_menu(user_id, int(message.chat.id), "That ad placement is unavailable.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         code = text.strip()
         enabled = code not in {"", "-", "off", "OFF"}
@@ -1918,45 +2470,62 @@ async def on_private_text(message: Message) -> None:
             {"$set": {"type": "ad", "slot": slot, "code": code if enabled else "", "enabled": enabled, "updated_at": utcnow()}},
             upsert=True,
         )
-        await tg.send_text(int(message.chat.id), f"<b>{'Enabled' if enabled else 'Disabled'}</b> the {html.escape(slot)} ad placement.")
+        await show_ads(int(message.chat.id), user_id=user_id, previous_message_id=payload.get("ui_message_id"))
         return
     if state.get("kind") == "member_custom_name":
         actor = await resolve_member_user(message.from_user)
         target_id = str(payload.get("target_id") or "")
         target = await get_db().members.find_one({"_id": target_id})
         if not actor or not target:
-            await tg.send_text(int(message.chat.id), "That member record is no longer available.")
+            await send_single_menu(user_id, int(message.chat.id), "That member record is no longer available.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         if actor.get("_id") != target.get("_id") and actor.get("role") != "owner":
-            await tg.send_text(int(message.chat.id), "You can change only your own custom name.")
+            await send_single_menu(user_id, int(message.chat.id), "You can change only your own custom name.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         raw_name = text.strip()
         custom_name = "" if raw_name.lower() in {"-", "skip"} else member_custom_name(raw_name)
         if raw_name and not custom_name:
             await save_state(user_id, "member_custom_name", payload)
-            await tg.send_text(int(message.chat.id), "Send a visible name up to 42 characters, or <code>-</code> to clear it.")
+            await send_single_menu(user_id, int(message.chat.id), "Send a visible name up to 42 characters, or <code>-</code> to clear it.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         updated = await set_member_custom_name(target, custom_name)
         if custom_name:
-            await tg.send_text(int(message.chat.id), f"Custom name saved: <b>{html.escape(member_display(updated))}</b>. Existing subtitle credits were updated too.")
+            result_text = f"✅ <i>Custom name saved:</i> <b>{html.escape(member_display(updated))}</b>. Existing subtitle credits were updated too."
         else:
-            await tg.send_text(int(message.chat.id), "Custom name removed. Your Telegram username is now shown on subtitle credits.")
+            result_text = "✅ <i>Custom name removed.</i> Your Telegram username is now shown on subtitle credits."
+        await send_single_menu(
+            user_id,
+            int(message.chat.id),
+            result_text,
+            InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+            previous_message_id=payload.get("ui_message_id"),
+        )
         return
     if state.get("kind") == "member_username":
         owner = await resolve_member_user(message.from_user)
         if not owner or owner.get("role") != "owner":
-            await tg.send_text(int(message.chat.id), "Owner access is required.")
+            await send_single_menu(user_id, int(message.chat.id), "Owner access is required.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
         username = clean_username(text)
         if not re.fullmatch(r"[a-z0-9_]{5,32}", username):
-            await tg.send_text(int(message.chat.id), "Send a valid public Telegram username, for example <code>@yourname</code>.")
             await save_state(user_id, "member_username", payload)
+            await send_single_menu(user_id, int(message.chat.id), "Send a valid public Telegram username, for example <code>@yourname</code>.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=payload.get("ui_message_id"))
             return
-        await save_state(user_id, "member_role", {"username": username})
         keyboard = InlineKeyboardMarkup(
-            [[pick_button("✦ Maker", "m:addrole:maker"), pick_button("🛠 Editor", "m:addrole:editor")], [pick_button("👑 Owner", "m:addrole:owner"), pick_button("✖ Cancel", "m:cancel")]]
+            menu_rows(
+                [[pick_button("✦ Maker", "m:addrole:maker"), pick_button("🛠 Editor", "m:addrole:editor")], [pick_button("👑 Owner", "m:addrole:owner")]],
+                home=True,
+                close=True,
+            )
         )
-        await tg.send_text(int(message.chat.id), f"Choose access for <b>@{html.escape(username)}</b>.", keyboard)
+        menu_message = await send_single_menu(
+            user_id,
+            int(message.chat.id),
+            f"Choose access for <b>@{html.escape(username)}</b>.",
+            keyboard,
+            previous_message_id=payload.get("ui_message_id"),
+        )
+        await save_state(user_id, "member_role", {"username": username, "ui_message_id": int(menu_message.id)})
 
 
 async def on_callback(callback: CallbackQuery) -> None:
@@ -1966,46 +2535,64 @@ async def on_callback(callback: CallbackQuery) -> None:
     chat_id = int(callback.message.chat.id)
 
     if data.startswith("h:"):
+        action = data.split(":", 1)[1]
+        if action == "close":
+            await tg.answer(callback, "Menu closed.")
+            await clear_state(user_id)
+            await get_db().bot_drafts.delete_many({"user_id": user_id, "mode": "new"})
+            await close_menu_session(user_id, chat_id, getattr(callback.message, "id", None))
+            return
         if not member:
             await tg.answer(callback, "Member access required.", alert=True)
             return
-        action = data.split(":", 1)[1]
         await tg.answer(callback)
-        if action == "submit":
-            await tg.send_text(chat_id, "Send your subtitle file now. Supported: <code>.srt .ass .ssa .vtt .zip</code>")
-        elif action == "myfiles":
-            await show_my_files(chat_id, member)
-        elif action == "myname":
-            await save_state(user_id, "member_custom_name", {"target_id": member["_id"]})
-            await tg.send_text(
+        if action == "menu":
+            await welcome(chat_id, member, user_id=user_id, previous_message_id=callback.message.id)
+        elif action == "submit":
+            await send_single_menu(
+                user_id,
                 chat_id,
-                "Send the custom name you want shown on your subtitle files. Use <code>-</code> to return to your Telegram username.",
+                "Send your subtitle file now. Supported: <code>.srt .ass .ssa .vtt .zip</code>",
+                InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                previous_message_id=callback.message.id,
             )
+        elif action == "myfiles":
+            await show_my_files(chat_id, member, user_id=user_id, previous_message_id=callback.message.id)
+        elif action == "myname":
+            prompt = "Send the custom name you want shown on your subtitle files. Use <code>-</code> to return to your Telegram username."
+            menu_message = await send_single_menu(
+                user_id,
+                chat_id,
+                prompt,
+                InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
+            await save_state(user_id, "member_custom_name", {"target_id": member["_id"], "ui_message_id": int(menu_message.id)})
         elif action == "library":
             if member.get("role") in {"owner", "editor"}:
-                await show_my_files(chat_id, member, all_files=True)
+                await show_my_files(chat_id, member, all_files=True, user_id=user_id, previous_message_id=callback.message.id)
             else:
-                await tg.send_text(chat_id, "The team library is limited to editors and owners.")
+                await send_single_menu(user_id, chat_id, "The team library is limited to editors and owners.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         elif action == "members":
             if member.get("role") == "owner":
-                await show_members(chat_id)
+                await show_members(chat_id, callback.message.id, user_id=user_id)
             else:
-                await tg.send_text(chat_id, "Only owners can manage members.")
+                await send_single_menu(user_id, chat_id, "Only owners can manage members.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         elif action == "reports":
             if member.get("role") in {"owner", "editor"}:
-                await show_reports(chat_id)
+                await show_reports(chat_id, user_id=user_id, previous_message_id=callback.message.id)
             else:
-                await tg.send_text(chat_id, "Only editors and owners can review reports.")
+                await send_single_menu(user_id, chat_id, "Only editors and owners can review reports.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         elif action == "ads":
             if member.get("role") == "owner":
-                await show_ads(chat_id)
+                await show_ads(chat_id, user_id=user_id, previous_message_id=callback.message.id)
             else:
-                await tg.send_text(chat_id, "Only owners can manage website ads.")
+                await send_single_menu(user_id, chat_id, "Only owners can manage website ads.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         elif action == "connectchannel":
             if member.get("role") == "owner":
-                await begin_channel_link(chat_id, user_id)
+                await begin_channel_link(chat_id, user_id, callback.message.id)
             else:
-                await tg.send_text(chat_id, "Only owners can link the subtitle storage channel.")
+                await send_single_menu(user_id, chat_id, "Only owners can link the subtitle storage channel.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         return
 
     if data.startswith("f:"):
@@ -2018,14 +2605,30 @@ async def on_callback(callback: CallbackQuery) -> None:
             await open_subtitle_editor(callback, member, parts[1])
             return
         action = parts[1] if len(parts) > 1 else ""
-        subtitle_id = parts[2] if len(parts) > 2 else ""
-        scope = parts[3] if len(parts) > 3 and parts[3] in {"mine", "team"} else "mine"
         if action == "list":
             scope = parts[2] if len(parts) > 2 and parts[2] in {"mine", "team"} else "mine"
             team = scope == "team" and member.get("role") in {"owner", "editor"}
             await tg.answer(callback)
-            await show_my_files(chat_id, member, all_files=team, previous_message_id=callback.message.id)
-        elif action == "view" and subtitle_id:
+            await show_my_files(chat_id, member, all_files=team, previous_message_id=callback.message.id, user_id=user_id)
+            return
+        if action == "title" and len(parts) >= 4:
+            title_id = parts[2]
+            scope = parts[3] if parts[3] in {"mine", "team"} else "mine"
+            await show_title_files(callback, member, title_id, scope)
+            return
+        if action == "ep" and len(parts) >= 6:
+            title_id = parts[2]
+            try:
+                season, episode = int(parts[3]), int(parts[4])
+            except ValueError:
+                await tg.answer(callback, "Invalid episode.", alert=True)
+                return
+            scope = parts[5] if parts[5] in {"mine", "team"} else "mine"
+            await show_episode_files(callback, member, title_id, season, episode, scope)
+            return
+        subtitle_id = parts[2] if len(parts) > 2 else ""
+        scope = parts[3] if len(parts) > 3 and parts[3] in {"mine", "team"} else "mine"
+        if action == "view" and subtitle_id:
             await show_subtitle_file_card(callback, member, subtitle_id, scope)
         elif action == "edit" and subtitle_id:
             await open_subtitle_editor(callback, member, subtitle_id)
@@ -2056,12 +2659,24 @@ async def on_callback(callback: CallbackQuery) -> None:
             await get_db().bot_drafts.delete_one({"_id": draft["_id"]})
             await clear_state(user_id)
             await tg.answer(callback, "Cancelled.")
-            await tg.replace_card(chat_id, "<b>SUBMISSION CANCELLED</b>\n\nSend another subtitle file whenever you are ready.", previous_message_id=callback.message.id)
+            await send_single_menu(
+                user_id,
+                chat_id,
+                "<b>SUBMISSION CANCELLED</b>\n\nSend another subtitle file whenever you are ready.",
+                InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
             return
         if action == "query":
             await save_state(user_id, "draft_query", {"draft_key": draft["draft_key"]})
             await tg.answer(callback)
-            await tg.send_text(chat_id, "Send the movie or series name to search on TMDB. Example: <code>We Live in Time</code>")
+            selected = draft.get("selected_tmdb") or {}
+            await tg.replace_card(
+                chat_id,
+                "<b>CHANGE TITLE SEARCH</b>\n\nSend the movie or series name to search on TMDB. Example: <code>We Live in Time</code>",
+                poster_url=selected.get("poster_url", ""),
+                previous_message_id=callback.message.id,
+            )
             return
         if action == "search" and len(parts) == 4:
             kind = parts[3] if parts[3] in {"all", "movie", "tv"} else "all"
@@ -2080,7 +2695,13 @@ async def on_callback(callback: CallbackQuery) -> None:
                 selected = await tmdb_details(kind, int(raw_id))
             except TMDBError as error:
                 await tg.answer(callback, "TMDB could not load that title.", alert=True)
-                await tg.send_text(chat_id, html.escape(str(error)))
+                await send_single_menu(
+                    user_id,
+                    chat_id,
+                    f"<b>TMDB could not load that title.</b>\n{html.escape(str(error))}",
+                    InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                    previous_message_id=callback.message.id,
+                )
                 return
             updates: dict[str, Any] = {"selected_tmdb": selected, "updated_at": utcnow()}
             if selected.get("tmdb_type") == "movie" and not draft.get("title_note_touched"):
@@ -2126,7 +2747,13 @@ async def on_callback(callback: CallbackQuery) -> None:
         if action == "note":
             await save_state(user_id, "draft_note", {"draft_key": draft["draft_key"]})
             await tg.answer(callback)
-            await tg.send_text(chat_id, "Send the creator note now. Send <code>-</code> to remove the note.")
+            selected = draft.get("selected_tmdb") or {}
+            await tg.replace_card(
+                chat_id,
+                "<b>RELEASE NOTE</b>\n\nSend the creator note now. Send <code>-</code> to remove the note.",
+                poster_url=selected.get("poster_url", ""),
+                previous_message_id=callback.message.id,
+            )
             return
         if action == "pagenote":
             if (draft.get("selected_tmdb") or {}).get("tmdb_type") != "movie":
@@ -2134,13 +2761,16 @@ async def on_callback(callback: CallbackQuery) -> None:
                 return
             await save_state(user_id, "draft_title_note", {"draft_key": draft["draft_key"]})
             await tg.answer(callback)
-            await tg.send_text(
+            selected = draft.get("selected_tmdb") or {}
+            await tg.replace_card(
                 chat_id,
                 "<b>MOVIE CARD NOTE</b>\n\n"
                 "Send the optional rich note for this movie page. It appears after the movie card and before the existing subtitle file list.\n\n"
                 "Text: <code>&lt;h2&gt;Release details&lt;/h2&gt;&lt;p&gt;Your note&lt;/p&gt;</code>\n"
                 "Image: <code>&lt;img src=\"https://example.com/image.jpg\" alt=\"Image description\"&gt;</code>\n\n"
                 "Headings, paragraphs, bold text, lists, links, images, tables and details are supported. Only secure <code>https://</code> links and images are kept. Send <code>-</code> to remove the note.",
+                poster_url=selected.get("poster_url", ""),
+                previous_message_id=callback.message.id,
             )
             return
         if action == "epnote":
@@ -2149,13 +2779,16 @@ async def on_callback(callback: CallbackQuery) -> None:
                 return
             await save_state(user_id, "draft_episode_note", {"draft_key": draft["draft_key"]})
             await tg.answer(callback)
-            await tg.send_text(
+            selected = draft.get("selected_tmdb") or {}
+            await tg.replace_card(
                 chat_id,
                 "<b>EPISODE PAGE NOTE</b>\n\n"
                 "Send an optional Sinhala rich note for this one episode. It appears below the TMDB synopsis and before the subtitle files.\n\n"
                 "Text: <code>&lt;h2&gt;වැදගත් සටහන&lt;/h2&gt;&lt;p&gt;ඔබගේ විස්තරය&lt;/p&gt;</code>\n"
                 "Image: <code>&lt;img src=\"https://example.com/image.jpg\" alt=\"Episode image\"&gt;</code>\n\n"
-                "Headings, paragraphs, bold text, lists, links, images, tables and details are supported. Only secure <code>https://</code> links and images are kept. Send <code>-</code> to remove the note.",
+                "Headings, paragraphs, bold text, lists, links, images, tables and details are supported. The built-in review-card style is kept when you edit a bundled note. Only secure <code>https://</code> links and images are kept. Send <code>-</code> to remove the note.",
+                poster_url=selected.get("poster_url", ""),
+                previous_message_id=callback.message.id,
             )
             return
         if action == "publish":
@@ -2175,9 +2808,15 @@ async def on_callback(callback: CallbackQuery) -> None:
         parts = data.split(":")
         action = parts[1] if len(parts) > 1 else ""
         if action == "add":
-            await save_state(user_id, "member_username", {})
             await tg.answer(callback)
-            await tg.send_text(chat_id, "Send the new member's public Telegram username, for example <code>@subtitlemaker</code>.")
+            menu_message = await send_single_menu(
+                user_id,
+                chat_id,
+                "Send the new member's public Telegram username, for example <code>@subtitlemaker</code>.",
+                InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
+            await save_state(user_id, "member_username", {"ui_message_id": int(menu_message.id)})
         elif action == "addrole" and len(parts) == 3:
             state = await pop_state(user_id)
             username = ((state or {}).get("payload") or {}).get("username")
@@ -2190,10 +2829,16 @@ async def on_callback(callback: CallbackQuery) -> None:
                 await tg.answer(callback, str(error), alert=True)
                 return
             await tg.answer(callback, "Member added.")
-            await tg.send_text(chat_id, f"<b>@{html.escape(added['username'])}</b> is now a <b>{role_label(added['role'])}</b>. They must press <code>/start</code> in this bot once to link their account.")
+            await send_single_menu(
+                user_id,
+                chat_id,
+                f"<b>@{html.escape(added['username'])}</b> is now a <b>{role_label(added['role'])}</b>. They must press <code>/start</code> in this bot once to link their account.",
+                InlineKeyboardMarkup(menu_rows([[pick_button("👥 Members", "m:list")]], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
         elif action == "list":
             await tg.answer(callback)
-            await show_members(chat_id, callback.message.id)
+            await show_members(chat_id, callback.message.id, user_id=user_id)
         elif action == "view" and len(parts) == 3:
             await tg.answer(callback)
             await show_member_card(callback, parts[2])
@@ -2202,12 +2847,15 @@ async def on_callback(callback: CallbackQuery) -> None:
             if not target:
                 await tg.answer(callback, "Member not found.", alert=True)
                 return
-            await save_state(user_id, "member_custom_name", {"target_id": target["_id"]})
             await tg.answer(callback)
-            await tg.send_text(
+            menu_message = await send_single_menu(
+                user_id,
                 chat_id,
                 f"Send the custom public name for <b>{html.escape(member_display(target))}</b>. Use <code>-</code> to clear it.",
+                InlineKeyboardMarkup(menu_rows([[pick_button("← Back", f"m:view:{target['_id']}")]], home=True, close=True)),
+                previous_message_id=callback.message.id,
             )
+            await save_state(user_id, "member_custom_name", {"target_id": target["_id"], "ui_message_id": int(menu_message.id)})
         elif action == "set" and len(parts) == 4:
             target = await get_db().members.find_one({"_id": parts[2]})
             role = parts[3]
@@ -2219,10 +2867,11 @@ async def on_callback(callback: CallbackQuery) -> None:
                 return
             await get_db().members.update_one({"_id": target["_id"]}, {"$set": {"role": role, "active": True, "updated_at": utcnow()}})
             await tg.answer(callback, "Role updated.")
-            await tg.replace_card(
+            await send_single_menu(
+                user_id,
                 chat_id,
                 f"Updated <b>{html.escape(member_display(target))}</b> to <b>{role_label(role)}</b>.",
-                InlineKeyboardMarkup([[pick_button("← Members", "m:list")]]),
+                InlineKeyboardMarkup(menu_rows([[pick_button("← Members", "m:list")]], home=True, close=True)),
                 previous_message_id=callback.message.id,
             )
         elif action == "toggle" and len(parts) == 3:
@@ -2236,10 +2885,11 @@ async def on_callback(callback: CallbackQuery) -> None:
             active = not bool(target.get("active"))
             await get_db().members.update_one({"_id": target["_id"]}, {"$set": {"active": active, "updated_at": utcnow()}})
             await tg.answer(callback, "Access updated.")
-            await tg.replace_card(
+            await send_single_menu(
+                user_id,
                 chat_id,
                 f"<b>{html.escape(member_display(target))}</b> is now <b>{'active' if active else 'inactive'}</b>.",
-                InlineKeyboardMarkup([[pick_button("← Members", "m:list")]]),
+                InlineKeyboardMarkup(menu_rows([[pick_button("← Members", "m:list")]], home=True, close=True)),
                 previous_message_id=callback.message.id,
             )
         elif action == "remove" and len(parts) == 3:
@@ -2258,10 +2908,11 @@ async def on_callback(callback: CallbackQuery) -> None:
                 await get_db().bot_states.delete_many({"user_id": str(target["telegram_id"])})
             await get_db().members.delete_one({"_id": target["_id"]})
             await tg.answer(callback, "Member removed.")
-            await tg.replace_card(
+            await send_single_menu(
+                user_id,
                 chat_id,
                 f"<b>MEMBER REMOVED</b>\n\n🗑 {html.escape(member_display(target))}\n\nTheir subtitle files were kept, but they can no longer access the bot.",
-                InlineKeyboardMarkup([[pick_button("← Members", "m:list")]]),
+                InlineKeyboardMarkup(menu_rows([[pick_button("← Members", "m:list")]], home=True, close=True)),
                 previous_message_id=callback.message.id,
             )
         elif action == "cancel":
@@ -2279,7 +2930,6 @@ async def on_callback(callback: CallbackQuery) -> None:
             await tg.answer(callback, "Invalid ad placement.", alert=True)
             return
         if parts[1] == "slot":
-            await save_state(user_id, "ad_code", {"slot": parts[2]})
             await tg.answer(callback)
             if parts[2] in {"site_bar_top", "site_bar_bottom"}:
                 position = "above the top navigation" if parts[2] == "site_bar_top" else "directly below the top navigation"
@@ -2290,7 +2940,14 @@ async def on_callback(callback: CallbackQuery) -> None:
                 )
             else:
                 prompt = "Send the full ad-network HTML/code now. It shows as a boxed banner on this placement's page. Send <code>-</code> to disable this placement."
-            await tg.send_text(chat_id, prompt)
+            menu_message = await send_single_menu(
+                user_id,
+                chat_id,
+                prompt,
+                InlineKeyboardMarkup(menu_rows([[pick_button("← Website ads", "h:ads")]], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
+            await save_state(user_id, "ad_code", {"slot": parts[2], "ui_message_id": int(menu_message.id)})
         elif parts[1] == "off":
             await get_db().settings.update_one(
                 {"type": "ad", "slot": parts[2]},
@@ -2298,7 +2955,7 @@ async def on_callback(callback: CallbackQuery) -> None:
                 upsert=True,
             )
             await tg.answer(callback, "Ad disabled.")
-            await tg.send_text(chat_id, f"Disabled the <b>{html.escape(parts[2])}</b> ad placement.")
+            await show_ads(chat_id, user_id=user_id, previous_message_id=callback.message.id)
         return
 
     if data.startswith("r:"):
@@ -2317,17 +2974,44 @@ async def on_callback(callback: CallbackQuery) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI public website — server-rendered Jinja pages
 # ─────────────────────────────────────────────────────────────────────────────
+async def _seed_demon_slayer_reviews_after_startup() -> None:
+    """Repair/add bundled episode notes without blocking the web server boot.
+
+    Hugging Face restarts a Space when startup takes too long.  The bundled
+    Demon Slayer note repair touches MongoDB records and should never hold the
+    health endpoint, Telegram client, or website startup hostage.
+    """
+    try:
+        await asyncio.wait_for(seed_demon_slayer_episode_reviews(), timeout=20)
+    except asyncio.TimeoutError:
+        logger.warning("Bundled Demon Slayer episode note repair timed out; it will retry on the next matching publish/startup.")
+    except Exception:
+        logger.exception("Could not seed bundled episode review notes")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    seed_task: asyncio.Task[None] | None = None
+    logger.info("Starting %s", APP_NAME)
     await initialise_database()
+    logger.info("Database connected and indexes ready.")
     try:
         await tg.start(on_channel_message, on_private_document, on_private_command, on_private_text, on_callback)
         logger.info("Telegram client online as @%s", tg.bot_username or "bot")
     except Exception:
         logger.exception("Telegram client could not start")
-    yield
-    await tg.stop()
-    await close_database()
+    seed_task = asyncio.create_task(_seed_demon_slayer_reviews_after_startup())
+    try:
+        yield
+    finally:
+        if seed_task and not seed_task.done():
+            seed_task.cancel()
+            try:
+                await seed_task
+            except asyncio.CancelledError:
+                pass
+        await tg.stop()
+        await close_database()
 
 
 app = FastAPI(title=APP_NAME, lifespan=lifespan)

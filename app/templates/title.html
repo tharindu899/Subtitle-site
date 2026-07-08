@@ -11,7 +11,7 @@
         <div class="tag-row"><span>{{ ui.type_label(title) }}</span><span>SINHALA SUBTITLES</span></div>
         <h1>{{ title.name }}</h1>
         <div class="fact-row"><span>{{ title.year or '—' }}</span><span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(title.rating or 0) }}</span><span>{{ title.subtitleCount }} FILES</span></div>
-        <p class="detail-hero__plot">{{ title.overview or 'Release-matched Sinhala subtitle files are available below.' }}</p>
+        <p>{{ title.overview or 'Release-matched Sinhala subtitle files are available below.' }}</p>
         <div class="vote-row" data-reaction-url="/api/public/titles/{{ title.id }}/reaction">
           <button type="button" data-vote="1" class="{{ 'is-active' if reactions.value == 1 else '' }}"><i class="fa-solid fa-thumbs-up"></i> Helpful <b data-like-count>{{ reactions.likes }}</b></button>
           <button type="button" data-vote="-1" class="{{ 'is-active' if reactions.value == -1 else '' }}"><i class="fa-solid fa-thumbs-down"></i> Not helpful <b data-dislike-count>{{ reactions.dislikes }}</b></button>

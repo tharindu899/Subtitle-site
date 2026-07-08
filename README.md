@@ -9,11 +9,7 @@ app_port: 7360
 
 <div align="center">
 
-<img src="docs/banner.svg" alt="CineLanka — Sinhala Subtitle Archive" width="100%" />
-
-<br/>
-
-<img src="docs/logo.svg" alt="CineLanka logo" width="88" />
+# 🎬 CineLanka — Sinhala Subtitle Archive
 
 **A release-matched Sinhala subtitle library, run entirely through Telegram.** 🇱🇰
 
@@ -107,7 +103,7 @@ flowchart LR
 |---|---|---|
 | `/` | 🏠 Home | Featured title, recently added shelf, movie & series rows |
 | `/browse` | 🗂️ Archive | Search, `all` / `movie` / `tv` filters, pagination |
-| `/title/{id}` | 🎞️ Title | Poster, backdrop, cast strip (horizontal scroll), 3-line clamped synopsis, episode picker |
+| `/title/{id}` | 🎞️ Title | Poster, backdrop, cast strip (horizontal scroll), synopsis, episode picker |
 | `/title/{id}/s01e02` | 📺 Episode | Episode still, per-episode note, subtitle file list, prev/next pager |
 
 **Page features at a glance:**
@@ -242,9 +238,6 @@ app/
 ├── parsing.py               Source / resolution / codec detection
 ├── tmdb.py
 └── telegram_service.py
-docs/
-├── banner.svg              README banner
-└── logo.svg                README logo (copy of app/static/brand.svg)
 Dockerfile
 requirements.txt
 config.env.example
