@@ -2,30 +2,29 @@
 {% import 'partials/macros.html' as ui with context %}
 {% block title %}{{ site_name }} · Sinhala Subtitle Archive{% endblock %}
 {% block content %}
-<section class="hero" {% if featured and featured.backdrop %}style="--hero-image: url('{{ featured.backdrop }}')"{% endif %}>
+<section class="hero neo-hero" {% if featured and featured.backdrop %}style="--hero-image: url('{{ featured.backdrop }}')"{% endif %}>
   <div class="hero__backdrop"></div>
-  <div class="hero__grain" aria-hidden="true"></div>
   <div class="shell hero__inner">
     {% if featured %}
       <div class="hero__layout">
         <div class="hero__content">
-          <span class="eyebrow">Now cataloguing · {{ ui.type_label(featured)|upper }}</span>
-          <h1>{{ featured.name }}</h1>
-          <div class="fact-row"><span>{{ featured.year or '—' }}</span><span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(featured.rating or 0) }}</span><span>{{ featured.subtitleCount }} FILES</span></div>
-          <p>{{ featured.overview or 'Find a Sinhala subtitle file that matches the release you are watching.' }}</p>
-          <div class="hero__actions"><a class="btn btn--stamp" href="{{ url_for('website_title', title_id=featured.id) }}">View release</a><a class="btn btn--ghost" href="{{ url_for('website_browse') }}">Browse archive</a></div>
+          <span class="eyebrow"><i class="fa-solid fa-bolt"></i> Featured {{ ui.type_label(featured) }}</span>
+          <h1>Match Sinhala subtitles with a <em>cinema-grade</em> archive.</h1>
+          <p>{{ featured.overview or 'Search Sinhala subtitle files by movie, series, episode and release tags.' }}</p>
+          <div class="fact-row fact-row--hero"><span>{{ featured.name }}</span><span>{{ featured.year or '—' }}</span><span><i class="fa-solid fa-star"></i> {{ '%.1f'|format(featured.rating or 0) }}</span><span>{{ featured.subtitleCount }} files</span></div>
+          <div class="hero__actions"><a class="btn btn--stamp" href="{{ url_for('website_title', title_id=featured.id) }}">Open featured</a><a class="btn btn--ghost" href="{{ url_for('website_browse') }}">Browse archive</a></div>
         </div>
         <a class="hero__poster" href="{{ url_for('website_title', title_id=featured.id) }}" aria-label="Open {{ featured.name }}">
           {{ ui.poster(featured) }}
-          <span><b>FEATURED</b><em>{{ featured.subtitleCount }} subtitle files</em></span>
+          <span><b>{{ featured.name }}</b><em>{{ featured.subtitleCount }} release files</em></span>
         </a>
       </div>
     {% else %}
-      <div class="hero__content hero__content--empty"><span class="eyebrow">{{ site_name|upper }} ARCHIVE</span><h1>Find subtitles that match your release.</h1><p>Browse release-matched Sinhala subtitle files for movies and series.</p><a class="btn btn--stamp" href="{{ url_for('website_browse') }}">Browse archive</a></div>
+      <div class="hero__content hero__content--empty"><span class="eyebrow"><i class="fa-solid fa-bolt"></i> {{ site_name }} archive</span><h1>Find subtitles that match your release.</h1><p>Browse release-matched Sinhala subtitle files for movies and series.</p><a class="btn btn--stamp" href="{{ url_for('website_browse') }}">Browse archive</a></div>
     {% endif %}
     <form class="hero__search" action="{{ url_for('website_browse') }}" method="get" role="search">
       <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-      <input name="q" placeholder="Search a movie, series or release" aria-label="Search the subtitle library">
+      <input name="q" placeholder="Search movie, series, episode or release" aria-label="Search the subtitle library">
       <button type="submit">Search archive</button>
     </form>
   </div>
@@ -33,31 +32,31 @@
 
 <main class="shell home-body">
   <section class="ledger" aria-label="Library statistics">
-    <div><strong>{{ stats.titles }}</strong><span>Titles</span></div>
-    <div><strong>{{ stats.subtitles }}</strong><span>Subtitle files</span></div>
-    <div><strong>{{ stats.downloads }}</strong><span>Downloads</span></div>
-    <a href="{{ url_for('website_browse') }}">Open full archive <i class="fa-solid fa-arrow-right"></i></a>
+    <div><i class="fa-solid fa-film"></i><strong>{{ stats.titles }}</strong><span>Titles</span></div>
+    <div><i class="fa-solid fa-closed-captioning"></i><strong>{{ stats.subtitles }}</strong><span>Subtitle files</span></div>
+    <div><i class="fa-solid fa-cloud-arrow-down"></i><strong>{{ stats.downloads }}</strong><span>Downloads</span></div>
+    <a href="{{ url_for('website_browse') }}">Open archive <i class="fa-solid fa-arrow-right"></i></a>
   </section>
 
   {{ ui.ad_slot(ads.home_top) }}
 
   {% if latest %}
-    <section class="section">
-      <div class="section__head"><div><span>Fresh off the reel</span><h2>Recently added</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}">View all <i class="fa-solid fa-arrow-right"></i></a></div>
+    <section class="section section--spotlight">
+      <div class="section__head"><div><span>Fresh drops</span><h2>Recently added</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}">View all <i class="fa-solid fa-arrow-right"></i></a></div>
       <div class="slip-list">{% for item in latest %}{{ ui.title_list_item(item) }}{% endfor %}</div>
     </section>
   {% endif %}
 
   {% if movies %}
     <section class="section">
-      <div class="section__head"><div><span>Feature reel</span><h2>Movies</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}?kind=movie">All movies <i class="fa-solid fa-arrow-right"></i></a></div>
+      <div class="section__head"><div><span>Cinema shelf</span><h2>Movies</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}?kind=movie">All movies <i class="fa-solid fa-arrow-right"></i></a></div>
       <div class="stamp-grid">{% for item in movies %}{{ ui.title_card(item) }}{% endfor %}</div>
     </section>
   {% endif %}
 
   {% if series %}
     <section class="section">
-      <div class="section__head"><div><span>Season by season</span><h2>Series</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}?kind=tv">All series <i class="fa-solid fa-arrow-right"></i></a></div>
+      <div class="section__head"><div><span>Episode worlds</span><h2>Series</h2></div><a class="link-arrow" href="{{ url_for('website_browse') }}?kind=tv">All series <i class="fa-solid fa-arrow-right"></i></a></div>
       <div class="stamp-grid">{% for item in series %}{{ ui.title_card(item) }}{% endfor %}</div>
     </section>
   {% endif %}

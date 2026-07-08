@@ -1,53 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Sinhala Subtitle Archive">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Subtitle logo">
   <defs>
-    <linearGradient id="panel" x1="60" y1="40" x2="452" y2="472" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2a231a"/>
-      <stop offset="1" stop-color="#0c0b09"/>
+    <linearGradient id="g" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#35E7FF"/>
+      <stop offset=".48" stop-color="#A855F7"/>
+      <stop offset="1" stop-color="#FFB545"/>
     </linearGradient>
-    <linearGradient id="reel" x1="150" y1="130" x2="390" y2="382" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffc25c"/>
-      <stop offset="1" stop-color="#eda23c"/>
+    <linearGradient id="p" x1="71" y1="70" x2="188" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#C9F8FF"/>
     </linearGradient>
-    <linearGradient id="badge" x1="324" y1="324" x2="432" y2="432" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#e0584c"/>
-      <stop offset="1" stop-color="#c1443a"/>
-    </linearGradient>
-    <filter id="amberGlow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
-      <feFlood flood-color="#eda23c" flood-opacity=".5" result="color"/>
-      <feComposite in="color" in2="blur" operator="in" result="glow"/>
-      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="s" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".35"/>
     </filter>
   </defs>
-
-  <rect width="512" height="512" rx="40" fill="#050403"/>
-  <rect x="14" y="14" width="484" height="484" rx="28" fill="url(#panel)"/>
-  <rect x="14" y="14" width="484" height="484" rx="28" fill="none" stroke="#3a3122" stroke-width="2"/>
-
-  <g fill="#3a3122">
-    <rect x="40" y="60" width="20" height="14" rx="4"/>
-    <rect x="40" y="118" width="20" height="14" rx="4"/>
-    <rect x="40" y="366" width="20" height="14" rx="4"/>
-    <rect x="40" y="424" width="20" height="14" rx="4"/>
-    <rect x="452" y="60" width="20" height="14" rx="4"/>
-    <rect x="452" y="118" width="20" height="14" rx="4"/>
-    <rect x="452" y="366" width="20" height="14" rx="4"/>
-    <rect x="452" y="424" width="20" height="14" rx="4"/>
-  </g>
-
-  <g filter="url(#amberGlow)">
-    <circle cx="256" cy="246" r="134" fill="none" stroke="url(#reel)" stroke-width="16"/>
-    <circle cx="256" cy="246" r="30" fill="url(#reel)"/>
-    <circle cx="256" cy="150" r="26" fill="none" stroke="url(#reel)" stroke-width="14"/>
-    <circle cx="176" cy="286" r="26" fill="none" stroke="url(#reel)" stroke-width="14"/>
-    <circle cx="336" cy="286" r="26" fill="none" stroke="url(#reel)" stroke-width="14"/>
-  </g>
-
-  <g>
-    <circle cx="378" cy="378" r="56" fill="#0c0b09" stroke="url(#badge)" stroke-width="6"/>
-    <circle cx="378" cy="378" r="56" fill="none" stroke="#0c0b09" stroke-width="2" stroke-dasharray="2 6"/>
-    <text x="378" y="399" text-anchor="middle" font-family="Georgia, serif" font-size="44" font-weight="700" fill="#f2ecdd">සි</text>
-  </g>
-
-  <circle cx="112" cy="112" r="6" fill="#eda23c"/>
+  <rect width="256" height="256" rx="62" fill="#080B21"/>
+  <path d="M38 61C38 48.3 48.3 38 61 38h134c12.7 0 23 10.3 23 23v134c0 12.7-10.3 23-23 23H61c-12.7 0-23-10.3-23-23V61Z" fill="url(#g)" opacity=".95"/>
+  <path d="M56 70c0-8.3 6.7-15 15-15h114c8.3 0 15 6.7 15 15v87c0 8.3-6.7 15-15 15H97l-37 30c-3 2.4-7.5.3-7.5-3.6V70H56Z" fill="#081024" opacity=".92" filter="url(#s)"/>
+  <path d="M103 86c0-6.1 6.7-9.8 11.9-6.6l55 34.1c4.9 3 4.9 10.1 0 13.1l-55 34.1c-5.2 3.2-11.9-.5-11.9-6.6V86Z" fill="url(#p)"/>
+  <rect x="75" y="148" width="104" height="11" rx="5.5" fill="#35E7FF"/>
+  <rect x="75" y="169" width="78" height="11" rx="5.5" fill="#FFB545"/>
 </svg>

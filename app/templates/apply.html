@@ -2,19 +2,20 @@
 {% block title %}Become a subtitle maker · {{ site_name }}{% endblock %}
 {% block content %}
 <main class="shell apply-view">
-  <div class="section__head">
-    <div><span>Join the team</span><h1>Become a subtitle maker</h1></div>
-    <p>Send your public Telegram username below. An owner reviews every application and approves or rejects it from the team bot.</p>
-  </div>
+  <section class="apply-hero glass-hero">
+    <span class="eyebrow"><i class="fa-solid fa-wand-magic-sparkles"></i> Creator access</span>
+    <h1>Join the subtitle maker team.</h1>
+    <p>Send your public Telegram username. An owner reviews every application and approves it from the team bot.</p>
+  </section>
 
   <form class="comment-form apply-form" data-apply-form data-post-url="/api/public/maker-application">
     <div class="comment-form__fields">
-      <input name="username" maxlength="32" required placeholder="Telegram username (e.g. yourname)" autocomplete="off">
+      <input name="username" maxlength="32" required placeholder="Telegram username, e.g. yourname" autocomplete="off">
       <textarea name="note" maxlength="500" placeholder="Optional: tell us about your subtitle experience"></textarea>
     </div>
     <footer><small data-apply-status></small><button type="submit">Send application</button></footer>
   </form>
 
-  <p class="apply-view__note">Already have a Telegram username with the team? Ask an owner directly instead. After approval, press <code>/start</code> in the bot once to link your account.</p>
+  <p class="apply-view__note">Already approved? Press <code>/start</code> in the bot once to link your account.</p>
 </main>
 {% endblock %}
