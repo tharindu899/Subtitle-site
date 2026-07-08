@@ -1,6 +1,6 @@
 {% macro poster(title, class_name='') -%}
   <div class="reel-frame {{ class_name }}">
-    {% if title.poster %}<img src="{{ title.poster }}" alt="{{ title.name }} poster" loading="lazy">{% else %}<span>{{ 'SERIES' if title.type == 'tv' else 'MOVIE' }}</span>{% endif %}
+    {% if title.poster %}<img src="{{ title.poster }}" alt="{{ title.name }} poster" loading="lazy">{% else %}<span>{{ 'TV' if title.type == 'tv' else 'FILM' }}</span>{% endif %}
   </div>
 {%- endmacro %}
 
@@ -13,7 +13,7 @@
       <span class="stamp-card__shade"></span>
       <span class="stamp-card__kind">{{ type_label(title) }}</span>
       {% if title.rating %}<span class="stamp-card__rating"><i class="fa-solid fa-star"></i> {{ '%.1f'|format(title.rating) }}</span>{% endif %}
-      <span class="stamp-card__open">Open <i class="fa-solid fa-arrow-right"></i></span>
+      <span class="stamp-card__open">Open file <i class="fa-solid fa-arrow-right"></i></span>
     </a>
     <div class="stamp-card__copy"><div class="stamp-card__stats"><span>{{ title.year or '—' }}</span><span>{{ title.subtitleCount }} files</span></div><a class="stamp-card__title" href="{{ url_for('website_title', title_id=title.id) }}">{{ title.name }}</a></div>
   </article>
@@ -30,15 +30,17 @@
 {% macro release_card(subtitle, index=0) -%}
   <article class="ticket">
     <div class="ticket__stub">
-      <span class="ticket__no">File</span>
+      <span class="ticket__no">No.</span>
       <span class="ticket__num">{{ '%02d'|format(index + 1) }}</span>
     </div>
+    <div class="ticket__perf" aria-hidden="true"></div>
     <div class="ticket__main">
       <h3>{{ subtitle.filename }}</h3>
       {% if subtitle.technicalLabel %}<p>{{ subtitle.technicalLabel }}</p>{% endif %}
       <div class="ticket__meta"><span>{{ subtitle.sizeLabel }}</span><span>{{ subtitle.maker }}</span>{% if subtitle.downloads %}<span>{{ subtitle.downloads }} download{{ '' if subtitle.downloads == 1 else 's' }}</span>{% endif %}</div>
       {% if subtitle.note %}<div class="ticket__note sinhala-copy" lang="si">{{ subtitle.note }}</div>{% endif %}
     </div>
+    <div class="ticket__perf" aria-hidden="true"></div>
     <div class="ticket__actions">
       <a class="ticket__download" href="{{ subtitle.downloadUrl }}" download><i class="fa-solid fa-download"></i> Download</a>
       <button class="ticket__report" type="button" data-report-url="/api/public/subtitles/{{ subtitle.id }}/report"><i class="fa-solid fa-flag"></i> Report</button>
@@ -54,4 +56,4 @@
   </section>
 {%- endmacro %}
 
-{% macro ad_slot(code) -%}{% if code %}<aside class="ad-frame"><span>Advertisement</span><div>{{ code | safe }}</div></aside>{% endif %}{%- endmacro %}
+{% macro ad_slot(code) -%}{% if code %}<aside class="ad-frame"><span>ADVERTISEMENT</span><div>{{ code | safe }}</div></aside>{% endif %}{%- endmacro %}
