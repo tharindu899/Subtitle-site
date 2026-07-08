@@ -1210,6 +1210,7 @@ async def send_single_menu(
     *,
     previous_message_id: int | None = None,
     delete_old: bool = True,
+    force_resend: bool = False,
 ) -> Message:
     """Show exactly one active menu card per user.
 
@@ -1222,7 +1223,7 @@ async def send_single_menu(
     except (TypeError, ValueError):
         given_id = None
     replace_id = given_id or stored_id
-    message = await tg.replace_card(chat_id, text, keyboard, previous_message_id=replace_id) if replace_id else await tg.send_text(chat_id, text, keyboard)
+    message = await tg.replace_card(chat_id, text, keyboard, previous_message_id=replace_id, force_resend=force_resend) if replace_id else await tg.send_text(chat_id, text, keyboard)
     if delete_old and stored_id and stored_id != replace_id and stored_id != int(message.id):
         try:
             await tg.require().delete_messages(chat_id, stored_id)
@@ -1345,7 +1346,7 @@ def draft_card_text(draft: dict[str, Any]) -> str:
     )
 
 
-async def show_draft(draft: dict[str, Any], previous_message_id: int | None = None) -> dict[str, Any]:
+async def show_draft(draft: dict[str, Any], previous_message_id: int | None = None, force_resend: bool = False) -> dict[str, Any]:
     selected = draft.get("selected_tmdb") or {}
     message = await tg.replace_card(
         int(draft["chat_id"]),
@@ -1353,6 +1354,7 @@ async def show_draft(draft: dict[str, Any], previous_message_id: int | None = No
         keyboard=draft_keyboard(draft),
         poster_url=selected.get("poster_url", ""),
         previous_message_id=previous_message_id if previous_message_id is not None else draft.get("ui_message_id"),
+        force_resend=force_resend,
     )
     await get_db().bot_drafts.update_one(
         {"_id": draft["_id"]},
@@ -2215,6 +2217,33 @@ async def show_reports(chat_id: int, *, user_id: str = "", previous_message_id: 
         await tg.send_text(chat_id, text[:3900], InlineKeyboardMarkup(rows))
 
 
+async def show_maker_applications(chat_id: int, previous_message_id: int | None = None, *, user_id: str = "") -> None:
+    applications = await get_db().maker_applications.find({"status": "pending"}).sort("created_at", -1).to_list(length=10)
+    if not applications:
+        text = "<b>NO PENDING APPLICATIONS</b>\n\nSubtitle-maker applications sent from the website will appear here."
+        keyboard = InlineKeyboardMarkup(menu_rows([], home=True, close=True))
+        if user_id:
+            await send_single_menu(str(user_id), chat_id, text, keyboard, previous_message_id=previous_message_id)
+        elif previous_message_id:
+            await tg.replace_card(chat_id, text, keyboard, previous_message_id=previous_message_id)
+        else:
+            await tg.send_text(chat_id, text, keyboard)
+        return
+    rows: list[list[InlineKeyboardButton]] = []
+    text = "<b>MAKER APPLICATIONS</b>\n\n"
+    for index, application in enumerate(applications, 1):
+        note = application.get("note") or "No message."
+        text += f"{index}. <b>@{html.escape(application.get('username', ''))}</b>\n{html.escape(note)}\n\n"
+        rows.append([pick_button(f"✓ Approve {index}", f"ap:approve:{application['_id']}"), pick_button(f"✖ Reject {index}", f"ap:reject:{application['_id']}")])
+    rows = menu_rows(rows, home=True, close=True)
+    if user_id:
+        await send_single_menu(str(user_id), chat_id, text[:3900], InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    elif previous_message_id:
+        await tg.replace_card(chat_id, text[:3900], InlineKeyboardMarkup(rows), previous_message_id=previous_message_id)
+    else:
+        await tg.send_text(chat_id, text[:3900], InlineKeyboardMarkup(rows))
+
+
 async def show_ads(chat_id: int, *, user_id: str = "", previous_message_id: int | None = None) -> None:
     records = await get_db().settings.find({"type": "ad"}).to_list(length=10)
     by_slot = {record.get("slot"): record for record in records}
@@ -2274,8 +2303,8 @@ async def welcome(
     if member.get("role") in {"owner", "editor"}:
         rows.append([pick_button("📚 Team library", "h:library"), pick_button("🚩 Reports", "h:reports")])
     if member.get("role") == "owner":
-        rows.append([pick_button("👥 Members", "h:members"), pick_button("📣 Website ads", "h:ads")])
-        rows.append([pick_button("🔗 Link storage channel", "h:connectchannel")])
+        rows.append([pick_button("👥 Members", "h:members"), pick_button("📥 Applications", "h:applications")])
+        rows.append([pick_button("📣 Website ads", "h:ads"), pick_button("🔗 Link storage channel", "h:connectchannel")])
     rows = menu_rows(rows, close=True)
     text = (
         f"<b>{bot_heading}</b>\n\n"
@@ -2333,6 +2362,11 @@ async def on_private_command(message: Message) -> None:
             await send_single_menu(user_id, chat_id, "Only owners can manage member access.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
         else:
             await show_members(chat_id, user_id=user_id)
+    elif command == "applications":
+        if member.get("role") != "owner":
+            await send_single_menu(user_id, chat_id, "Only owners can review maker applications.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
+        else:
+            await show_maker_applications(chat_id, user_id=user_id)
     elif command == "reports":
         if member.get("role") not in {"owner", "editor"}:
             await send_single_menu(user_id, chat_id, "Only editors and owners can review reports.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
@@ -2413,7 +2447,7 @@ async def on_private_text(message: Message) -> None:
         if removed:
             note = ""
         await get_db().bot_drafts.update_one({"_id": draft["_id"]}, {"$set": {"note": note, "updated_at": utcnow()}})
-        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}))
+        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}), force_resend=len(note) > 120)
         return
     if state.get("kind") == "draft_title_note":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
@@ -2434,7 +2468,7 @@ async def on_private_text(message: Message) -> None:
             {"_id": draft["_id"]},
             {"$set": {"title_note_html": note_html, "title_note_touched": True, "updated_at": utcnow()}},
         )
-        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}))
+        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}), force_resend=len(raw_note) > 120)
         return
     if state.get("kind") == "draft_episode_note":
         draft = await draft_for(payload.get("draft_key", ""), user_id)
@@ -2452,7 +2486,7 @@ async def on_private_text(message: Message) -> None:
             {"_id": draft["_id"]},
             {"$set": {"episode_note": note_html, "episode_note_touched": True, "updated_at": utcnow()}},
         )
-        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}))
+        await show_draft(await get_db().bot_drafts.find_one({"_id": draft["_id"]}), force_resend=len(raw_note) > 120)
         return
     if state.get("kind") == "ad_code":
         owner = await resolve_member_user(message.from_user)
@@ -2578,6 +2612,11 @@ async def on_callback(callback: CallbackQuery) -> None:
                 await show_members(chat_id, callback.message.id, user_id=user_id)
             else:
                 await send_single_menu(user_id, chat_id, "Only owners can manage members.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
+        elif action == "applications":
+            if member.get("role") == "owner":
+                await show_maker_applications(chat_id, callback.message.id, user_id=user_id)
+            else:
+                await send_single_menu(user_id, chat_id, "Only owners can review maker applications.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=callback.message.id)
         elif action == "reports":
             if member.get("role") in {"owner", "editor"}:
                 await show_reports(chat_id, user_id=user_id, previous_message_id=callback.message.id)
@@ -2968,6 +3007,51 @@ async def on_callback(callback: CallbackQuery) -> None:
             await tg.answer(callback, "Report closed.")
         return
 
+    if data.startswith("ap:"):
+        if not member or member.get("role") != "owner":
+            await tg.answer(callback, "Owner access required.", alert=True)
+            return
+        parts = data.split(":")
+        if len(parts) != 3 or parts[1] not in {"approve", "reject"}:
+            await tg.answer(callback, "Invalid application action.", alert=True)
+            return
+        application = await get_db().maker_applications.find_one({"_id": parts[2], "status": "pending"})
+        if not application:
+            await tg.answer(callback, "That application was already reviewed.", alert=True)
+            return
+        if parts[1] == "approve":
+            try:
+                added = await add_member_from_username(application["username"], "maker")
+            except ValueError as error:
+                await tg.answer(callback, str(error), alert=True)
+                return
+            await get_db().maker_applications.update_one(
+                {"_id": application["_id"]},
+                {"$set": {"status": "approved", "decided_by": member["_id"], "decided_at": utcnow()}},
+            )
+            await tg.answer(callback, "Application approved.")
+            await send_single_menu(
+                user_id,
+                chat_id,
+                f"✅ <b>@{html.escape(added['username'])}</b> approved as a <b>Maker</b>. They must press <code>/start</code> in this bot once to link their account.",
+                InlineKeyboardMarkup(menu_rows([[pick_button("📥 Applications", "h:applications")]], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
+        else:
+            await get_db().maker_applications.update_one(
+                {"_id": application["_id"]},
+                {"$set": {"status": "rejected", "decided_by": member["_id"], "decided_at": utcnow()}},
+            )
+            await tg.answer(callback, "Application rejected.")
+            await send_single_menu(
+                user_id,
+                chat_id,
+                f"🚫 Application from <b>@{html.escape(application.get('username', ''))}</b> rejected.",
+                InlineKeyboardMarkup(menu_rows([[pick_button("📥 Applications", "h:applications")]], home=True, close=True)),
+                previous_message_id=callback.message.id,
+            )
+        return
+
     await tg.answer(callback, "Unknown action.")
 
 
@@ -3330,6 +3414,42 @@ async def api_report_subtitle(request: Request, subtitle_id: str) -> JSONRespons
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/public/maker-application")
+async def api_apply_maker(request: Request) -> JSONResponse:
+    try:
+        data = await request.json()
+    except ValueError:
+        data = {}
+    database = get_db()
+    now = utcnow()
+    last = request.session.get("last_application_at")
+    if last:
+        try:
+            if now.timestamp() - float(last) < 30:
+                raise HTTPException(status_code=429, detail="Please wait a bit before sending another application.")
+        except ValueError:
+            pass
+    username = clean_username(str(data.get("username") or ""))
+    note = re.sub(r"\s+", " ", str(data.get("note") or "")).strip()[:500]
+    if not re.fullmatch(r"[a-z0-9_]{5,32}", username):
+        raise HTTPException(status_code=422, detail="Send a valid public Telegram username, for example @yourname.")
+    if await database.members.find_one({"username": username, "active": True}, {"_id": 1}):
+        raise HTTPException(status_code=422, detail="This Telegram username is already part of the team.")
+    if await database.maker_applications.find_one({"username": username, "status": "pending"}, {"_id": 1}):
+        raise HTTPException(status_code=422, detail="This username already has an application waiting for review.")
+    await database.maker_applications.insert_one(
+        {
+            "_id": new_id("apply_"),
+            "username": username,
+            "note": note,
+            "status": "pending",
+            "created_at": now,
+        }
+    )
+    request.session["last_application_at"] = str(now.timestamp())
+    return JSONResponse({"ok": True}, status_code=201)
+
+
 @app.get("/download/{subtitle_id}")
 async def download_subtitle(subtitle_id: str) -> Any:
     subtitle = await get_db().subtitles.find_one({"_id": subtitle_id, "status": "published", "language": "Sinhala"})
@@ -3394,6 +3514,15 @@ async def website_home(request: Request) -> HTMLResponse:
             series=series[:12],
             stats=await public_stats(),
         ),
+    )
+
+
+@app.get("/apply", response_class=HTMLResponse, name="website_apply")
+async def website_apply(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="apply.html",
+        context=await template_context(request, "apply"),
     )
 
 

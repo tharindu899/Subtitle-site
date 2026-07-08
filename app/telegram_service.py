@@ -346,6 +346,7 @@ class TelegramService:
         keyboard: InlineKeyboardMarkup | None = None,
         poster_url: str = "",
         previous_message_id: int | None = None,
+        force_resend: bool = False,
     ) -> Message:
         """Update one persistent menu card in place instead of delete + resend.
 
@@ -354,12 +355,16 @@ class TelegramService:
         the same message box. A delete-and-send-new only happens as a last
         resort, when Telegram genuinely cannot apply an in-place edit (the
         card type must flip between text-only and photo, or the stored
-        message was deleted/too old for Telegram to touch).
+        message was deleted/too old for Telegram to touch) — or when the
+        caller explicitly asks for it via force_resend, e.g. right after the
+        user typed a long note: the old card, edited in place, would still
+        sit above that long message and the user would have to scroll up to
+        see it, so a fresh card is sent at the bottom instead.
         """
         client = self.require()
         poster = await self._remote_poster(poster_url) if poster_url else None
 
-        if previous_message_id:
+        if previous_message_id and not force_resend:
             try:
                 if poster:
                     return await client.edit_message_media(

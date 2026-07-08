@@ -49,6 +49,8 @@ async def initialise_database() -> None:
     await db.comments.create_index([("title_id", 1), ("created_at", -1)])
     await db.comment_votes.create_index([("comment_id", 1), ("visitor_id", 1)], unique=True)
     await db.reports.create_index([("status", 1), ("created_at", -1)])
+    await db.maker_applications.create_index([("status", 1), ("created_at", -1)])
+    await db.maker_applications.create_index([("username", 1), ("status", 1)])
     await db.bot_drafts.create_index("expires_at", expireAfterSeconds=0)
     await db.bot_drafts.create_index([("user_id", 1), ("updated_at", -1)])
     await db.bot_states.create_index("expires_at", expireAfterSeconds=0)

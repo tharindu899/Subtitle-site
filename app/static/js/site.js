@@ -185,4 +185,18 @@
       } catch (error) { status.textContent = error.message }
     })
   })
+  document.querySelectorAll('[data-apply-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const status = form.querySelector('[data-apply-status]')
+      const fields = new FormData(form)
+      status.textContent = 'Sending…'
+      try {
+        await requestJson(form.dataset.postUrl, { method: 'POST', body: JSON.stringify({ username: fields.get('username'), note: fields.get('note') }) })
+        form.reset()
+        status.textContent = 'Application sent. An owner will review it in the team bot.'
+        form.querySelector('button[type="submit"]').disabled = true
+      } catch (error) { status.textContent = error.message }
+    })
+  })
 })()

@@ -37,6 +37,7 @@
           <a class="{{ 'is-current' if page_name == 'browse' else '' }}" href="{{ url_for('website_browse') }}">Archive</a>
           <a href="{{ url_for('website_browse') }}?kind=movie">Movies</a>
           <a href="{{ url_for('website_browse') }}?kind=tv">Series</a>
+          <a class="{{ 'is-current' if page_name == 'apply' else '' }}" href="{{ url_for('website_apply') }}">Join as maker</a>
         </nav>
 
         <div class="header-tools">
@@ -56,6 +57,7 @@
               <a href="{{ url_for('website_browse') }}">Full archive</a>
               <a href="{{ url_for('website_browse') }}?kind=movie">Movies</a>
               <a href="{{ url_for('website_browse') }}?kind=tv">Series</a>
+              <a href="{{ url_for('website_apply') }}">Join as maker</a>
             </nav>
           </details>
         </div>
@@ -107,13 +109,20 @@
         <a href="{{ url_for('website_browse') }}">Archive</a>
         <a href="{{ url_for('website_browse') }}?kind=movie">Movies</a>
         <a href="{{ url_for('website_browse') }}?kind=tv">Series</a>
+        <a href="{{ url_for('website_apply') }}">Join as maker</a>
       </nav>
       <div class="site-footer__info">
         <span>HOW MATCHING WORKS</span>
         <p>Check the resolution, source and codec printed on each file stub, then match it against the video you're watching before you download.</p>
       </div>
     </div>
-    <div class="shell site-footer__bottom"><span>© {{ current_year }} {{ site_name }}</span><span>This product uses the TMDB API but is not endorsed or certified by TMDB.</span></div>
+    <div class="shell site-footer__bottom">
+      <span>© {{ current_year }} {{ site_name }}</span>
+      <a class="site-footer__credit" href="https://web.toxybox99.eu.org/" target="_blank" rel="noopener">
+        <i class="fa-solid fa-code" aria-hidden="true"></i> Built by toxybox99
+      </a>
+      <span>This product uses the TMDB API but is not endorsed or certified by TMDB.</span>
+    </div>
   </footer>
 
   <script src="/static/js/site.js?v={{ asset_version }}" defer></script>
