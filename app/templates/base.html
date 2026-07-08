@@ -3,19 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0a0714">
+  <meta name="theme-color" content="#0a0620">
   <meta name="description" content="{{ site_name }} — release-matched Sinhala subtitles for movies and series.">
   <link rel="icon" href="/brand.svg?v={{ brand_version }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500;1,600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="/static/css/site.css?v={{ asset_version }}">
   <title>{% block title %}{{ site_name }} · Sinhala Subtitles{% endblock %}</title>
 </head>
 <body class="page page--{{ page_name|default('home') }}">
 
-  <div class="bg-aurora" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+  <div class="bg-scene" aria-hidden="true">
+    <span class="bg-blob bg-blob--a"></span>
+    <span class="bg-blob bg-blob--b"></span>
+    <span class="bg-blob bg-blob--c"></span>
+    <span class="bg-blob bg-blob--d"></span>
+    <div class="bg-scene__grid"></div>
+    <div class="bg-scene__stars"></div>
+    <div class="bg-scene__grain"></div>
+  </div>
 
   <div class="site-nav-dock" data-site-nav-dock>
     {% if ads.site_bar_top %}
