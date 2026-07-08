@@ -2,12 +2,6 @@
 {% import 'partials/macros.html' as ui with context %}
 {% block title %}{{ site_name }} · Sinhala Subtitle Archive{% endblock %}
 {% block content %}
-{% if latest %}
-<div class="ticker" aria-hidden="true"><div class="ticker__track">
-  {% for item in latest %}<span><i class="fa-solid fa-circle"></i> {{ item.name|upper }} — {{ item.subtitleCount }} file{{ '' if item.subtitleCount == 1 else 's' }} catalogued</span>{% endfor %}
-  {% for item in latest %}<span><i class="fa-solid fa-circle"></i> {{ item.name|upper }} — {{ item.subtitleCount }} file{{ '' if item.subtitleCount == 1 else 's' }} catalogued</span>{% endfor %}
-</div></div>
-{% endif %}
 <section class="hero" {% if featured and featured.backdrop %}style="--hero-image: url('{{ featured.backdrop }}')"{% endif %}>
   <div class="hero__backdrop"></div>
   <div class="hero__grain" aria-hidden="true"></div>
