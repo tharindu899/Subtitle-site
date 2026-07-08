@@ -3,15 +3,15 @@
 {% block title %}Archive · {{ site_name }}{% endblock %}
 {% block content %}
 <main class="shell archive-page">
-  <section class="archive-header glass-hero">
-    <div><span class="eyebrow"><i class="fa-solid fa-layer-group"></i> {{ site_name }} archive</span><h1>Browse the full subtitle universe.</h1><p>Search release-matched Sinhala subtitles by title, episode, codec, quality, or release group.</p></div>
+  <section class="archive-header">
+    <div><span class="eyebrow">THE {{ site_name|upper }} ARCHIVE</span><h1>Find the right file <em>first.</em></h1><p>Search release-matched Sinhala subtitle files for movies and episodes.</p></div>
     <div class="archive-header__count"><b>{{ total }}</b><span>matching titles</span></div>
   </section>
 
   <section class="archive-toolbar">
     <form class="archive-toolbar__search" action="{{ url_for('website_browse') }}" method="get" role="search">
       <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-      <input name="q" value="{{ query }}" placeholder="Search titles or releases" aria-label="Search titles">
+      <input name="q" value="{{ query }}" placeholder="Search titles" aria-label="Search titles">
       {% if kind != 'all' %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
       <button type="submit">Search</button>
     </form>
@@ -22,14 +22,14 @@
     </nav>
   </section>
 
-  <div class="result-line"><span>{% if query %}Results for “{{ query }}”{% else %}All catalogued titles{% endif %}</span><span>Page {{ page }} of {{ pages }}</span></div>
+  <div class="result-line"><span>{% if query %}Results for "{{ query }}"{% else %}All catalogued titles{% endif %}</span><span>Page {{ page }} of {{ pages }}</span></div>
 
   {{ ui.ad_slot(ads.browse_inline) }}
 
   {% if titles %}
     <div class="stamp-grid stamp-grid--archive">{% for title in titles %}{{ ui.title_card(title) }}{% endfor %}</div>
   {% else %}
-    <section class="void-card"><span>No matches</span><h2>Nothing found for that search.</h2><p>Try another movie, series, episode, or release name.</p><a class="btn btn--stamp" href="{{ url_for('website_browse') }}">Browse all titles</a></section>
+    <section class="void-card"><span>NO MATCHES</span><h2>Nothing found for that search.</h2><p>Try another movie, series or release name.</p><a class="btn btn--stamp" href="{{ url_for('website_browse') }}">Browse all titles</a></section>
   {% endif %}
 
   {% if pages > 1 %}
