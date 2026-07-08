@@ -3,19 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c0b09">
+  <meta name="theme-color" content="#120a08">
   <meta name="description" content="{{ site_name }} — release-matched Sinhala subtitles for movies and series.">
   <link rel="icon" href="/brand.svg?v={{ brand_version }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="/static/css/site.css?v={{ asset_version }}">
   <title>{% block title %}{{ site_name }} · Sinhala Subtitles{% endblock %}</title>
 </head>
 <body class="page page--{{ page_name|default('home') }}">
 
+  <div class="bg-anim" aria-hidden="true">
+    <div class="beam b1"></div><div class="beam b2"></div>
+    <div class="grain"></div>
+    <span class="spark" style="left:8%; width:3px; height:3px; color:#fff; background:#fff; --dx:12px; animation-duration:19s; animation-delay:-4s;"></span>
+    <span class="spark" style="left:18%; width:3.4px; height:3.4px; color:var(--oxblood); background:var(--oxblood); --dx:-18px; animation-duration:23s; animation-delay:-11s;"></span>
+    <span class="spark" style="left:29%; width:2.6px; height:2.6px; color:var(--amber); background:var(--amber); --dx:24px; animation-duration:17s; animation-delay:-2s;"></span>
+    <span class="spark" style="left:41%; width:3.8px; height:3.8px; color:var(--amber); background:var(--amber); --dx:-9px; animation-duration:25s; animation-delay:-16s;"></span>
+    <span class="spark" style="left:52%; width:2.8px; height:2.8px; color:#fff; background:#fff; --dx:15px; animation-duration:20s; animation-delay:-7s;"></span>
+    <span class="spark" style="left:60%; width:3.2px; height:3.2px; color:var(--teal); background:var(--teal); --dx:-27px; animation-duration:22s; animation-delay:-19s;"></span>
+    <span class="spark" style="left:68%; width:4px; height:4px; color:var(--amber); background:var(--amber); --dx:8px; animation-duration:18s; animation-delay:-9s;"></span>
+    <span class="spark" style="left:76%; width:2.5px; height:2.5px; color:var(--oxblood); background:var(--oxblood); --dx:-14px; animation-duration:24s; animation-delay:-1s;"></span>
+    <span class="spark" style="left:84%; width:3.4px; height:3.4px; color:#fff; background:#fff; --dx:22px; animation-duration:21s; animation-delay:-13s;"></span>
+    <span class="spark" style="left:92%; width:3px; height:3px; color:var(--amber); background:var(--amber); --dx:-6px; animation-duration:19.5s; animation-delay:-6s;"></span>
+  </div>
+
   <div class="site-nav-dock" data-site-nav-dock>
+    <div class="bulb-strip" aria-hidden="true">
+      <div class="bulb-strip__track">
+        {% for _ in range(60) %}<span></span>{% endfor %}
+        {% for _ in range(60) %}<span></span>{% endfor %}
+        {% for _ in range(60) %}<span></span>{% endfor %}
+      </div>
+    </div>
     {% if ads.site_bar_top %}
       <div class="ad-ticker" data-ad-ticker aria-label="Advertisement">
         <div class="ad-ticker__track">
