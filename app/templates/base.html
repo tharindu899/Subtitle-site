@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c0b09">
+  <meta name="theme-color" content="#0a0714">
   <meta name="description" content="{{ site_name }} — release-matched Sinhala subtitles for movies and series.">
   <link rel="icon" href="/brand.svg?v={{ brand_version }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,6 +14,8 @@
   <title>{% block title %}{{ site_name }} · Sinhala Subtitles{% endblock %}</title>
 </head>
 <body class="page page--{{ page_name|default('home') }}">
+
+  <div class="bg-aurora" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
 
   <div class="site-nav-dock" data-site-nav-dock>
     {% if ads.site_bar_top %}
