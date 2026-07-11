@@ -268,3 +268,10 @@ No bot token, session, members, channel link, files, website templates, or ad se
 Made for a fast, release-matched Sinhala subtitle experience 🎬
 
 </div>
+
+## 2026-07-09 Web animation V2
+
+- Strengthened the animated spider-web page background on all public pages.
+- Added extra mobile-safe web ambience behind page sections.
+- Fixed Android/WebView scroll restoration that could open episode pages halfway down and cut the hero title.
+- Added responsive pager/button wrapping polish for small screens.

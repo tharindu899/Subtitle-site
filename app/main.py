@@ -45,6 +45,8 @@ from .tmdb import (
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+for _noisy_logger in ("httpx", "pyrogram.connection.connection", "pyrogram.session.session", "pyrogram.session.auth", "pyrogram.dispatcher"):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 logger = logging.getLogger("tharinduhub.subtitles")
 
 APP_NAME = f"{settings.site_name} Subtitles"
@@ -380,10 +382,75 @@ def subtitle_matches_episode(subtitle: dict[str, Any], season: int, episode: int
     return (int(season), int(episode)) in subtitle_episode_targets(subtitle)
 
 
+def _optional_int(value: Any) -> int | None:
+    return int(value) if str(value or "").isdigit() else None
+
+
+def subtitle_logical_key(subtitle: dict[str, Any]) -> tuple[str, str, str, int | None, int | None, int | None]:
+    """Stable identity for one public release row.
+
+    Telegram can deliver the same channel document once through the channel
+    handler and once through the publish callback.  It can also receive a same
+    filename re-post.  The website should show one release row per logical
+    subtitle file, not one row per Telegram message.
+    """
+    return (
+        str(subtitle.get("title_id") or ""),
+        str(subtitle.get("language") or "Sinhala"),
+        str(subtitle.get("filename") or "").strip().casefold(),
+        _optional_int(subtitle.get("season")),
+        _optional_int(subtitle.get("episode")),
+        _optional_int(subtitle.get("episode_end")),
+    )
+
+
+def _timestamp_score(value: Any) -> float:
+    if isinstance(value, datetime):
+        try:
+            return value.timestamp()
+        except (OSError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def subtitle_preference(subtitle: dict[str, Any]) -> tuple[int, int, int, float]:
+    """Prefer manually published/member-owned records over raw channel imports."""
+    return (
+        1 if subtitle.get("status") == "published" else 0,
+        1 if subtitle.get("uploader_id") else 0,
+        1 if subtitle.get("imported_from") != "channel_auto" else 0,
+        _timestamp_score(subtitle.get("updated_at") or subtitle.get("created_at")),
+    )
+
+
+def unique_subtitle_records(subtitles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    choices: dict[tuple[str, str, str, int | None, int | None, int | None], dict[str, Any]] = {}
+    for subtitle in subtitles:
+        key = subtitle_logical_key(subtitle)
+        if not key[2]:
+            key = (*key[:2], str(subtitle.get("_id") or new_id("row_")), *key[3:])
+        current = choices.get(key)
+        if current is None or subtitle_preference(subtitle) >= subtitle_preference(current):
+            choices[key] = subtitle
+    return sorted(choices.values(), key=lambda item: _timestamp_score(item.get("created_at") or item.get("updated_at")), reverse=True)
+
+
+def subtitle_logical_filter(title_id: str, filename: str, season: Any, episode: Any, episode_end: Any) -> dict[str, Any]:
+    return {
+        "title_id": title_id,
+        "language": "Sinhala",
+        "filename": filename,
+        "season": _optional_int(season),
+        "episode": _optional_int(episode),
+        "episode_end": _optional_int(episode_end),
+        "status": {"$ne": "hidden"},
+    }
+
+
 def title_episode_groups(subtitles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Make a stable episode index for the TV-title page without TMDB calls."""
     groups: dict[tuple[int, int], dict[str, Any]] = {}
-    for subtitle in subtitles:
+    for subtitle in unique_subtitle_records(subtitles):
         for season, episode in subtitle_episode_targets(subtitle):
             key = (season, episode)
             item = groups.setdefault(
@@ -870,11 +937,12 @@ async def ensure_title(tmdb_info: dict[str, Any] | None, fallback_name: str) -> 
 
 async def refresh_title_counts(title_id: str) -> None:
     database = get_db()
-    count = await database.subtitles.count_documents({"title_id": title_id, "status": "published", "language": "Sinhala"})
-    downloads = sum(
-        row.get("download_count", 0)
-        for row in await database.subtitles.find({"title_id": title_id}, {"download_count": 1}).to_list(length=5000)
-    )
+    published_rows = await database.subtitles.find(
+        {"title_id": title_id, "status": "published", "language": "Sinhala"}
+    ).to_list(length=5000)
+    visible_rows = unique_subtitle_records(published_rows)
+    count = len(visible_rows)
+    downloads = sum(int(row.get("download_count") or 0) for row in visible_rows)
     await database.titles.update_one(
         {"_id": title_id},
         {"$set": {"subtitle_count": count, "download_count": downloads, "status": "published" if count else "review", "updated_at": utcnow()}},
@@ -929,7 +997,14 @@ async def auto_tmdb_match(title_guess: str, is_series: bool) -> dict[str, Any] |
 
 
 async def ingest_channel_message(message: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """Import a Telegram channel document once. Bot-published captions carry reliable metadata."""
+    """Import or refresh one Telegram channel subtitle document.
+
+    A just-published document can arrive twice: first through the channel update
+    handler without metadata, then through the publish callback with trusted
+    member/title metadata.  This function upgrades the first record instead of
+    creating a second row, and it collapses same-filename re-posts into one
+    visible website file.
+    """
     database = get_db()
     document = getattr(message, "document", None)
     filename = getattr(document, "file_name", "") if document else ""
@@ -940,15 +1015,16 @@ async def ingest_channel_message(message: Any, metadata: dict[str, Any] | None =
     message_id = int(getattr(message, "id", 0) or 0)
     if not message_id:
         return None
-    existing = await database.subtitles.find_one({"channel_id": channel_id, "message_id": message_id})
-    if existing:
-        return existing
 
-    metadata = metadata or {}
+    trusted_metadata = dict(metadata or {})
+    existing_by_message = await database.subtitles.find_one({"channel_id": channel_id, "message_id": message_id})
+    if existing_by_message and not trusted_metadata:
+        return existing_by_message
+
     caption = getattr(message, "caption", "") or ""
     guess = parse_subtitle_name(filename, caption)
     tmdb_info: dict[str, Any] | None = None
-    supplied_type, supplied_id = metadata.get("tmdb_type"), metadata.get("tmdb_id")
+    supplied_type, supplied_id = trusted_metadata.get("tmdb_type"), trusted_metadata.get("tmdb_id")
     if supplied_type and supplied_id:
         try:
             tmdb_info = await tmdb_details(str(supplied_type), int(supplied_id))
@@ -965,16 +1041,20 @@ async def ingest_channel_message(message: Any, metadata: dict[str, Any] | None =
         tmdb_info = await auto_tmdb_match(guess.title_guess, bool(guess.season))
 
     title = await ensure_title(tmdb_info, guess.title_guess)
-    uploader = await resolve_uploader(message, metadata)
-    source_type = metadata.get("source_type") if metadata.get("source_type") in SOURCE_TYPES else (caption_source(caption) or guess.source_type)
-    resolution = metadata.get("resolution") if metadata.get("resolution") in RESOLUTIONS else (caption_resolution(caption) or guess.resolution)
-    note = str(metadata.get("note") or guess.note or "").strip()[:1000]
-    season = metadata.get("season") if metadata.get("season") is not None else guess.season
-    episode = metadata.get("episode") if metadata.get("episode") is not None else guess.episode
-    status = metadata.get("status") if metadata.get("status") in {"published", "review", "hidden"} else ("published" if tmdb_info else "review")
+    uploader = await resolve_uploader(message, trusted_metadata)
+    source_type = trusted_metadata.get("source_type") if trusted_metadata.get("source_type") in SOURCE_TYPES else (caption_source(caption) or guess.source_type)
+    resolution = trusted_metadata.get("resolution") if trusted_metadata.get("resolution") in RESOLUTIONS else (caption_resolution(caption) or guess.resolution)
+    note = str(trusted_metadata.get("note") or guess.note or "").strip()[:1000]
+    season = trusted_metadata.get("season") if trusted_metadata.get("season") is not None else guess.season
+    episode = trusted_metadata.get("episode") if trusted_metadata.get("episode") is not None else guess.episode
+    episode_end = trusted_metadata.get("episode_end") if trusted_metadata.get("episode_end") is not None else getattr(guess, "episode_end", None)
+    season_value = _optional_int(season)
+    episode_value = _optional_int(episode)
+    episode_end_value = _optional_int(episode_end) or None
+    status = trusted_metadata.get("status") if trusted_metadata.get("status") in {"published", "review", "hidden"} else ("published" if tmdb_info else "review")
+    now = utcnow()
 
-    subtitle = {
-        "_id": new_id("sub_"),
+    update_payload = {
         "title_id": title["_id"],
         "channel_id": channel_id,
         "message_id": message_id,
@@ -984,30 +1064,75 @@ async def ingest_channel_message(message: Any, metadata: dict[str, Any] | None =
         "language": "Sinhala",
         "source_type": source_type,
         "resolution": resolution,
-        "season": int(season) if str(season or "").isdigit() else None,
-        "episode": int(episode) if str(episode or "").isdigit() else None,
-        "episode_end": int(getattr(guess, "episode_end", 0) or 0) or None,
-        "codec": getattr(guess, "codec", ""),
-        "bit_depth": getattr(guess, "bit_depth", ""),
-        "hdr": getattr(guess, "hdr", ""),
-        "release_group": getattr(guess, "release_group", ""),
+        "season": season_value,
+        "episode": episode_value,
+        "episode_end": episode_end_value,
+        "codec": trusted_metadata.get("codec") or getattr(guess, "codec", ""),
+        "bit_depth": trusted_metadata.get("bit_depth") or getattr(guess, "bit_depth", ""),
+        "hdr": trusted_metadata.get("hdr") or getattr(guess, "hdr", ""),
+        "release_group": trusted_metadata.get("release_group") or getattr(guess, "release_group", ""),
         "note": note,
+        "source_private_chat_id": str(trusted_metadata.get("source_private_chat_id") or ""),
+        "source_private_message_id": _optional_int(trusted_metadata.get("source_private_message_id")) or None,
         "uploader_id": uploader.get("_id") if uploader else None,
         "uploader_name": member_display(uploader) if uploader else (getattr(message, "author_signature", "") or "Channel contributor"),
         "uploader_username": uploader.get("username") if uploader else caption_uploader(caption),
         "status": status,
+        "updated_at": now,
+        "imported_from": "bot" if trusted_metadata else "channel_auto",
+    }
+
+    logical_filter = subtitle_logical_filter(title["_id"], filename, season_value, episode_value, episode_end_value)
+
+    async def hide_other_duplicates(keeper_id: str) -> None:
+        result = await database.subtitles.update_many(
+            {**logical_filter, "_id": {"$ne": keeper_id}},
+            {"$set": {"status": "hidden", "duplicate_of": keeper_id, "updated_at": utcnow()}},
+        )
+        if result.modified_count:
+            logger.info("Hidden %s duplicate subtitle row(s) for %s", result.modified_count, filename)
+
+    if existing_by_message:
+        keeper_id = existing_by_message["_id"]
+        await database.subtitles.update_one({"_id": keeper_id}, {"$set": update_payload})
+        await hide_other_duplicates(keeper_id)
+        await refresh_title_counts(title["_id"])
+        return await database.subtitles.find_one({"_id": keeper_id})
+
+    duplicates = await database.subtitles.find(logical_filter).to_list(length=20)
+    if duplicates:
+        keeper = max(duplicates, key=subtitle_preference)
+        # Trusted callback metadata should upgrade the existing row and point it
+        # at the newest channel message.  Raw channel scans only return the best
+        # existing row, so a second auto-import cannot create visible duplicates.
+        if trusted_metadata or keeper.get("imported_from") == "channel_auto":
+            await database.subtitles.update_one({"_id": keeper["_id"]}, {"$set": update_payload})
+            await hide_other_duplicates(keeper["_id"])
+            await refresh_title_counts(title["_id"])
+            return await database.subtitles.find_one({"_id": keeper["_id"]})
+        return keeper
+
+    subtitle = {
+        "_id": new_id("sub_"),
+        **update_payload,
         "download_count": 0,
-        "created_at": utcnow(),
-        "updated_at": utcnow(),
-        "imported_from": "bot" if metadata else "channel_auto",
+        "created_at": now,
     }
     try:
         await database.subtitles.insert_one(subtitle)
     except DuplicateKeyError:
-        return await database.subtitles.find_one({"channel_id": channel_id, "message_id": message_id})
+        existing = await database.subtitles.find_one({"channel_id": channel_id, "message_id": message_id})
+        if existing:
+            await database.subtitles.update_one({"_id": existing["_id"]}, {"$set": update_payload})
+            await hide_other_duplicates(existing["_id"])
+            await refresh_title_counts(title["_id"])
+            return await database.subtitles.find_one({"_id": existing["_id"]})
+        duplicate = await database.subtitles.find_one(logical_filter)
+        if duplicate:
+            return duplicate
+        raise
     await refresh_title_counts(title["_id"])
     return subtitle
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Telegram member identity and bot workflow helpers
@@ -1474,22 +1599,40 @@ async def create_new_draft(message: Message, member: dict[str, Any]) -> None:
     document = message.document
     filename = document.file_name or "subtitle.srt"
     user_id = str(message.from_user.id)
+    chat_id = int(message.chat.id)
+    source_message_id = int(message.id)
     if not valid_subtitle_filename(filename):
         extensions = ", ".join(sorted(ALLOWED_EXTENSIONS))
         await send_single_menu(
             user_id,
-            int(message.chat.id),
+            chat_id,
             f"<b>Unsupported file.</b>\n\nSend only subtitle files: <code>{extensions}</code>",
             InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
         )
         return
+
+    source_key = {"source_private_chat_id": str(chat_id), "source_private_message_id": source_message_id}
+    already_posted = await get_db().bot_auto_posts.find_one(source_key)
+    if already_posted:
+        # Edited updates can arrive again for a message that has already been
+        # copied to the storage channel. Do not spam a second channel post.
+        if getattr(message, "edit_date", None):
+            return
+        await send_single_menu(
+            user_id,
+            chat_id,
+            "<b>Already auto-posted.</b>\n\nThis Telegram file was already sent to the subtitle channel. Use <code>/myfiles</code> if you need to edit the saved website details.",
+            InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+        )
+        return
+
     guess = parse_subtitle_name(filename, message.caption or "")
+    previous_draft = await get_db().bot_drafts.find_one({"user_id": user_id, "mode": "new"}, sort=[("updated_at", -1)])
+    previous_ui_message_id = int(previous_draft.get("ui_message_id") or 0) if previous_draft else None
     await get_db().bot_drafts.delete_many({"user_id": user_id, "mode": "new"})
-    # Try to auto-match the title from the filename first, the same confident
-    # matcher used for direct channel imports. When it finds one, the draft
-    # opens straight on the "READY TO PUBLISH" card instead of making the
-    # uploader search and pick manually. If nothing confident is found, this
-    # stays None and the existing manual search/pick flow below is unchanged.
+    # Try to auto-match the title from the filename/caption. When a confident
+    # match is found the file is posted directly without opening the edit menu.
+    # If the match is uncertain, the normal READY TO PUBLISH menu is shown.
     auto_selected = await auto_tmdb_match(guess.title_guess, bool(guess.season))
     draft = {
         "_id": new_id("draft_"),
@@ -1497,9 +1640,9 @@ async def create_new_draft(message: Message, member: dict[str, Any]) -> None:
         "mode": "new",
         "user_id": user_id,
         "member_id": member["_id"],
-        "chat_id": int(message.chat.id),
-        "source_chat_id": int(message.chat.id),
-        "source_message_id": int(message.id),
+        "chat_id": chat_id,
+        "source_chat_id": chat_id,
+        "source_message_id": source_message_id,
         "file_id": document.file_id,
         "filename": filename,
         "file_size": int(document.file_size or 0),
@@ -1520,13 +1663,16 @@ async def create_new_draft(message: Message, member: dict[str, Any]) -> None:
         "episode_note_touched": False,
         "selected_tmdb": auto_selected,
         "tmdb_results": [],
-        "ui_message_id": None,
+        "ui_message_id": previous_ui_message_id,
         "created_at": utcnow(),
         "updated_at": utcnow(),
         "expires_at": utcnow() + timedelta(hours=12),
     }
     await get_db().bot_drafts.insert_one(draft)
-    await show_draft(draft)
+    if auto_selected:
+        await auto_publish_new_draft(draft, member, previous_message_id=previous_ui_message_id)
+        return
+    await show_draft(draft, previous_message_id=previous_ui_message_id)
 
 
 async def edit_draft_from_subtitle(chat_id: int, user_id: str, member: dict[str, Any], subtitle: dict[str, Any]) -> None:
@@ -1590,41 +1736,121 @@ async def edit_draft_from_subtitle(chat_id: int, user_id: str, member: dict[str,
     await show_draft(draft)
 
 
-async def publish_new_draft(draft: dict[str, Any], member: dict[str, Any], callback: CallbackQuery) -> None:
+async def store_new_draft_to_channel(draft: dict[str, Any], member: dict[str, Any]) -> dict[str, Any] | None:
     selected = draft.get("selected_tmdb")
     if not selected:
-        await tg.answer(callback, "Choose a TMDB title first.", alert=True)
-        return
+        raise ValueError("Choose a TMDB title first.")
     caption = channel_caption(draft, member)
     page_keyboard = channel_page_keyboard(selected, draft.get("season"), draft.get("episode"))
-    try:
-        channel_message = await tg.copy_document_to_channel(
-            int(draft["source_chat_id"]),
-            int(draft["source_message_id"]),
-            str(draft["file_id"]),
-            caption,
-            page_keyboard,
-        )
-        record = await ingest_channel_message(
-            channel_message,
+    channel_message = await tg.copy_document_to_channel(
+        int(draft["source_chat_id"]),
+        int(draft["source_message_id"]),
+        str(draft["file_id"]),
+        caption,
+        page_keyboard,
+    )
+    record = await ingest_channel_message(
+        channel_message,
+        {
+            "uploader_id": member["_id"],
+            "uploader_username": member.get("username", ""),
+            "tmdb_type": selected["tmdb_type"],
+            "tmdb_id": selected["tmdb_id"],
+            "source_type": draft.get("source_type"),
+            "resolution": draft.get("resolution"),
+            "season": draft.get("season"),
+            "episode": draft.get("episode"),
+            "episode_end": draft.get("episode_end"),
+            "codec": draft.get("codec") or "",
+            "bit_depth": draft.get("bit_depth") or "",
+            "hdr": draft.get("hdr") or "",
+            "release_group": draft.get("release_group") or "",
+            "note": draft.get("note"),
+            "source_private_chat_id": str(draft.get("source_chat_id") or ""),
+            "source_private_message_id": int(draft.get("source_message_id") or 0),
+            "status": "published",
+        },
+    )
+    if record:
+        saved_title = await get_db().titles.find_one({"_id": record.get("title_id")})
+        if saved_title:
+            await save_draft_title_note(draft, saved_title, member)
+            await save_draft_episode_note(draft, saved_title, member)
+        await get_db().bot_auto_posts.update_one(
             {
-                "uploader_id": member["_id"],
-                "uploader_username": member.get("username", ""),
-                "tmdb_type": selected["tmdb_type"],
-                "tmdb_id": selected["tmdb_id"],
-                "source_type": draft.get("source_type"),
-                "resolution": draft.get("resolution"),
-                "season": draft.get("season"),
-                "episode": draft.get("episode"),
-                "episode_end": draft.get("episode_end"),
-                "codec": draft.get("codec") or "",
-                "bit_depth": draft.get("bit_depth") or "",
-                "hdr": draft.get("hdr") or "",
-                "release_group": draft.get("release_group") or "",
-                "note": draft.get("note"),
-                "status": "published",
+                "source_private_chat_id": str(draft.get("source_chat_id") or ""),
+                "source_private_message_id": int(draft.get("source_message_id") or 0),
             },
+            {
+                "$set": {
+                    "subtitle_id": record.get("_id"),
+                    "title_id": record.get("title_id"),
+                    "channel_id": record.get("channel_id"),
+                    "channel_message_id": record.get("message_id"),
+                    "filename": draft.get("filename"),
+                    "updated_at": utcnow(),
+                },
+                "$setOnInsert": {"created_at": utcnow()},
+            },
+            upsert=True,
         )
+    await get_db().bot_drafts.delete_one({"_id": draft["_id"]})
+    await clear_state(draft["user_id"])
+    logger.info("Published bot subtitle: %s (%s)", draft["filename"], (record or {}).get("_id", "stored"))
+    return record
+
+
+def publish_success_text(draft: dict[str, Any], member: dict[str, Any], *, auto: bool = False) -> str:
+    selected = draft.get("selected_tmdb") or {}
+    title = selected.get("name") or "subtitle"
+    heading = "SUBTITLE AUTO-POSTED" if auto else "SUBTITLE PUBLISHED"
+    return (
+        f"<b>{heading}</b>\n\n"
+        f"🎬 <b>{html.escape(title)}</b>\n"
+        f"📁 {html.escape(draft['filename'])}\n"
+        f"🏷 {html.escape(draft.get('source_type') or 'Other')} · {html.escape(draft.get('resolution') or 'Other')}\n"
+        f"👤 Saved as {html.escape(member_display(member))}\n\n"
+        "The file is stored in the subtitle channel and visible on the website."
+    )
+
+
+async def auto_publish_new_draft(draft: dict[str, Any], member: dict[str, Any], previous_message_id: int | None = None) -> None:
+    try:
+        await store_new_draft_to_channel(draft, member)
+    except TelegramStorageError as error:
+        await send_single_menu(
+            str(draft["user_id"]),
+            int(draft["chat_id"]),
+            f"<b>Auto-post failed.</b>\n{html.escape(str(error))}\n\nThe draft is kept. Tap <b>Send to channel</b> after checking channel access.",
+            draft_keyboard(draft),
+            previous_message_id=previous_message_id,
+        )
+        return
+    except Exception:
+        logger.exception("Auto publish failed")
+        await send_single_menu(
+            str(draft["user_id"]),
+            int(draft["chat_id"]),
+            "<b>Auto-post failed.</b>\n\nThe draft is kept. Check the detected details and tap <b>Send to channel</b>.",
+            draft_keyboard(draft),
+            previous_message_id=previous_message_id,
+        )
+        return
+    await send_single_menu(
+        str(draft["user_id"]),
+        int(draft["chat_id"]),
+        publish_success_text(draft, member, auto=True),
+        InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+        previous_message_id=previous_message_id,
+    )
+
+
+async def publish_new_draft(draft: dict[str, Any], member: dict[str, Any], callback: CallbackQuery) -> None:
+    if not draft.get("selected_tmdb"):
+        await tg.answer(callback, "Choose a TMDB title first.", alert=True)
+        return
+    try:
+        await store_new_draft_to_channel(draft, member)
     except TelegramStorageError as error:
         await tg.answer(callback, "Telegram storage failed. Retry after checking channel access.", alert=True)
         await send_single_menu(
@@ -1640,24 +1866,13 @@ async def publish_new_draft(draft: dict[str, Any], member: dict[str, Any], callb
         await tg.answer(callback, "Publishing failed. The draft was kept.", alert=True)
         return
 
-    if record:
-        saved_title = await get_db().titles.find_one({"_id": record.get("title_id")})
-        if saved_title:
-            await save_draft_title_note(draft, saved_title, member)
-            await save_draft_episode_note(draft, saved_title, member)
-    await get_db().bot_drafts.delete_one({"_id": draft["_id"]})
-    await clear_state(draft["user_id"])
-    title = selected.get("name") or "subtitle"
-    text = (
-        "<b>SUBTITLE PUBLISHED</b>\n\n"
-        f"🎬 <b>{html.escape(title)}</b>\n"
-        f"📁 {html.escape(draft['filename'])}\n"
-        f"🏷 {html.escape(draft.get('source_type') or 'Other')} · {html.escape(draft.get('resolution') or 'Other')}\n"
-        f"👤 Saved as {html.escape(member_display(member))}\n\n"
-        "The file is now stored in the subtitle channel and visible on the website."
+    await send_single_menu(
+        str(draft["user_id"]),
+        int(draft["chat_id"]),
+        publish_success_text(draft, member),
+        InlineKeyboardMarkup(menu_rows([], home=True, close=True)),
+        previous_message_id=getattr(callback.message, "id", None),
     )
-    await send_single_menu(str(draft["user_id"]), int(draft["chat_id"]), text, InlineKeyboardMarkup(menu_rows([], home=True, close=True)), previous_message_id=getattr(callback.message, "id", None))
-    logger.info("Published bot subtitle: %s (%s)", draft["filename"], (record or {}).get("_id", "stored"))
 
 
 async def save_edit_draft(draft: dict[str, Any], member: dict[str, Any], callback: CallbackQuery) -> None:
@@ -2310,7 +2525,7 @@ async def welcome(
         f"<b>{bot_heading}</b>\n\n"
         f"Welcome, <b>{html.escape(member_display(member))}</b>\n"
         f"Role: <b>{role}</b>\n\n"
-        "Send a subtitle file here. The bot will show TMDB results and poster, then lets you choose the source, resolution and note before publishing to the channel."
+        "Send a subtitle file here. If the .srt name is short, add the matching video release in the caption. Movie minimum: Ghosted 2023. TV minimum: Show.Name.S01E04. Quality/source/codec like 720p, WEB-DL, x265 or DDP5.1 are optional only. The bot auto-detects title, year, season, episode and any extra release details. Confident matches auto-post directly; unclear matches open the review menu."
     )
     session_user = str(user_id or member.get("telegram_id") or "")
     if session_user:
@@ -2349,7 +2564,7 @@ async def on_private_command(message: Message) -> None:
         await welcome(chat_id, None, user_id=user_id)
         return
     if command == "submit":
-        await send_single_menu(user_id, chat_id, "Send your <code>.srt</code>, <code>.ass</code>, <code>.ssa</code>, <code>.vtt</code>, or <code>.zip</code> file now. I will detect the release details and open the title menu.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
+        await send_single_menu(user_id, chat_id, "Send your <code>.srt</code>, <code>.ass</code>, <code>.ssa</code>, <code>.vtt</code>, or <code>.zip</code> file now. Add the movie/episode release in the caption if the filename is short. Confident matches auto-post directly; unclear matches open the review menu.", InlineKeyboardMarkup(menu_rows([], home=True, close=True)))
     elif command == "myfiles":
         await show_my_files(chat_id, member, user_id=user_id)
     elif command == "library":
@@ -3058,6 +3273,61 @@ async def on_callback(callback: CallbackQuery) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI public website — server-rendered Jinja pages
 # ─────────────────────────────────────────────────────────────────────────────
+async def hide_duplicate_subtitle_records() -> int:
+    """Hide already-stored duplicate rows created before the de-dupe fix."""
+    database = get_db()
+    pipeline = [
+        {"$match": {"status": "published", "language": "Sinhala"}},
+        {
+            "$group": {
+                "_id": {
+                    "title_id": "$title_id",
+                    "language": "$language",
+                    "filename": {"$toLower": {"$ifNull": ["$filename", ""]}},
+                    "season": "$season",
+                    "episode": "$episode",
+                    "episode_end": "$episode_end",
+                },
+                "ids": {"$push": "$_id"},
+                "title_ids": {"$addToSet": "$title_id"},
+                "count": {"$sum": 1},
+            }
+        },
+        {"$match": {"count": {"$gt": 1}}},
+        {"$limit": 500},
+    ]
+    hidden = 0
+    touched_titles: set[str] = set()
+    async for group in database.subtitles.aggregate(pipeline):
+        ids = [str(value) for value in group.get("ids", [])]
+        records = await database.subtitles.find({"_id": {"$in": ids}}).to_list(length=100)
+        if len(records) <= 1:
+            continue
+        keeper = max(records, key=subtitle_preference)
+        duplicate_ids = [row["_id"] for row in records if row.get("_id") != keeper.get("_id")]
+        if not duplicate_ids:
+            continue
+        result = await database.subtitles.update_many(
+            {"_id": {"$in": duplicate_ids}},
+            {"$set": {"status": "hidden", "duplicate_of": keeper["_id"], "updated_at": utcnow()}},
+        )
+        hidden += int(result.modified_count or 0)
+        touched_titles.update(str(value) for value in group.get("title_ids", []) if value)
+    for title_id in touched_titles:
+        await refresh_title_counts(title_id)
+    if hidden:
+        logger.info("Hidden %s duplicate subtitle row(s) during startup maintenance.", hidden)
+    return hidden
+
+
+async def _startup_maintenance() -> None:
+    try:
+        await hide_duplicate_subtitle_records()
+    except Exception:
+        logger.exception("Could not hide duplicate subtitle rows")
+    await _seed_demon_slayer_reviews_after_startup()
+
+
 async def _seed_demon_slayer_reviews_after_startup() -> None:
     """Repair/add bundled episode notes without blocking the web server boot.
 
@@ -3075,7 +3345,7 @@ async def _seed_demon_slayer_reviews_after_startup() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    seed_task: asyncio.Task[None] | None = None
+    maintenance_task: asyncio.Task[None] | None = None
     logger.info("Starting %s", APP_NAME)
     await initialise_database()
     logger.info("Database connected and indexes ready.")
@@ -3084,14 +3354,14 @@ async def lifespan(app: FastAPI):
         logger.info("Telegram client online as @%s", tg.bot_username or "bot")
     except Exception:
         logger.exception("Telegram client could not start")
-    seed_task = asyncio.create_task(_seed_demon_slayer_reviews_after_startup())
+    maintenance_task = asyncio.create_task(_startup_maintenance())
     try:
         yield
     finally:
-        if seed_task and not seed_task.done():
-            seed_task.cancel()
+        if maintenance_task and not maintenance_task.done():
+            maintenance_task.cancel()
             try:
-                await seed_task
+                await maintenance_task
             except asyncio.CancelledError:
                 pass
         await tg.stop()
@@ -3258,7 +3528,7 @@ async def api_title(request: Request, title_id: str) -> JSONResponse:
     title = await database.titles.find_one({"_id": title_id, "status": "published"})
     if not title:
         raise HTTPException(status_code=404, detail="This title is unavailable.")
-    subtitles = await database.subtitles.find({"title_id": title_id, "status": "published", "language": "Sinhala"}).sort("created_at", -1).to_list(length=600)
+    subtitles = unique_subtitle_records(await database.subtitles.find({"title_id": title_id, "status": "published", "language": "Sinhala"}).sort("created_at", -1).to_list(length=600))
     if not subtitles:
         raise HTTPException(status_code=404, detail="This title has no published Sinhala subtitles.")
     related = await title_cards(media_type=str(title.get("tmdb_type") or "all"), limit=20)
@@ -3291,9 +3561,9 @@ async def api_episode(title_id: str, season: int, episode: int) -> JSONResponse:
     title = await database.titles.find_one({"_id": title_id, "status": "published", "tmdb_type": "tv"})
     if not title:
         raise HTTPException(status_code=404, detail="This series is unavailable.")
-    all_subtitles = await database.subtitles.find(
+    all_subtitles = unique_subtitle_records(await database.subtitles.find(
         {"title_id": title_id, "status": "published", "language": "Sinhala"}
-    ).sort("created_at", -1).to_list(length=600)
+    ).sort("created_at", -1).to_list(length=600))
     subtitles = [item for item in all_subtitles if subtitle_matches_episode(item, season, episode)]
     if not subtitles:
         raise HTTPException(status_code=404, detail="No published Sinhala subtitle is available for this episode.")
@@ -3547,9 +3817,9 @@ async def public_title_page_context(request: Request, title_id: str) -> dict[str
     title_document = await database.titles.find_one({"_id": title_id, "status": "published"})
     if not title_document:
         return None
-    subtitle_documents = await database.subtitles.find(
+    subtitle_documents = unique_subtitle_records(await database.subtitles.find(
         {"title_id": title_id, "status": "published", "language": "Sinhala"}
-    ).sort("created_at", -1).to_list(length=600)
+    ).sort("created_at", -1).to_list(length=600))
     if not subtitle_documents:
         return None
     title = public_title({**title_document, "_sinhala_subtitle_count": len(subtitle_documents)})
@@ -3587,9 +3857,9 @@ async def website_episode(request: Request, title_id: str, season: int, episode:
     title_document = await database.titles.find_one({"_id": title_id, "status": "published", "tmdb_type": "tv"})
     if not title_document:
         return await error_page(request, 404, "Series not found", "This series is currently unavailable.")
-    all_subtitles = await database.subtitles.find(
+    all_subtitles = unique_subtitle_records(await database.subtitles.find(
         {"title_id": title_id, "status": "published", "language": "Sinhala"}
-    ).sort("created_at", -1).to_list(length=600)
+    ).sort("created_at", -1).to_list(length=600))
     matching = [item for item in all_subtitles if subtitle_matches_episode(item, season, episode)]
     if not matching:
         return await error_page(request, 404, "Subtitle not found", "There is no published Sinhala subtitle file for this episode yet.")
@@ -3651,6 +3921,13 @@ async def favicon_ico() -> Any:
 @app.get("/apple-touch-icon.svg", include_in_schema=False)
 async def apple_touch_icon_svg() -> Any:
     return await _brand_icon_response()
+
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+async def assetlinks_json() -> JSONResponse:
+    # Some Android browsers request this automatically.  Returning an empty
+    # statement list avoids noisy 404 logs without claiming app-link ownership.
+    return JSONResponse([], headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/{path:path}", include_in_schema=False)

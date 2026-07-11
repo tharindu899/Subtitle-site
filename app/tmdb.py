@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import copy
 import re
+import time
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -17,6 +20,41 @@ PROFILE_BASE = "https://image.tmdb.org/t/p/w185"
 
 class TMDBError(RuntimeError):
     pass
+
+_REQUEST_CACHE_TTL = 600
+_REQUEST_CACHE: dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, dict[str, Any]]] = {}
+_REQUEST_LOCKS: dict[tuple[str, tuple[tuple[str, str], ...]], asyncio.Lock] = {}
+
+
+def _cache_key(path: str, params: dict[str, Any]) -> tuple[str, tuple[tuple[str, str], ...]]:
+    return (path, tuple(sorted((str(key), str(value)) for key, value in params.items())))
+
+
+def _cached_payload(key: tuple[str, tuple[tuple[str, str], ...]]) -> dict[str, Any] | None:
+    cached = _REQUEST_CACHE.get(key)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time.monotonic():
+        _REQUEST_CACHE.pop(key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _store_payload(key: tuple[str, tuple[tuple[str, str], ...]], payload: dict[str, Any]) -> dict[str, Any]:
+    # Tiny in-process cache.  It collapses bursts such as 10 subtitle files for
+    # the same series into one TMDB search/details request and keeps API keys out
+    # of repeated httpx request logs.
+    if len(_REQUEST_CACHE) > 256:
+        now = time.monotonic()
+        for cached_key, (expires_at, _) in list(_REQUEST_CACHE.items()):
+            if expires_at <= now:
+                _REQUEST_CACHE.pop(cached_key, None)
+        if len(_REQUEST_CACHE) > 256:
+            _REQUEST_CACHE.pop(next(iter(_REQUEST_CACHE)), None)
+    _REQUEST_CACHE[key] = (time.monotonic() + _REQUEST_CACHE_TTL, copy.deepcopy(payload))
+    return copy.deepcopy(payload)
+
 
 
 def _normalise_title(value: str) -> str:
@@ -96,23 +134,34 @@ def is_confident_match(result: dict[str, Any] | None, query: str, expected_kind:
 async def request(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     if not settings.tmdb_api_key:
         raise TMDBError("TMDB_API is not configured.")
-    query = {"api_key": settings.tmdb_api_key, "language": "en-US"}
-    query.update(params or {})
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(18.0, connect=8.0)) as client:
-            response = await client.get(f"{TMDB_BASE}{path}", params=query)
-    except httpx.HTTPError as error:
-        raise TMDBError("TMDB could not be reached.") from error
-    try:
-        payload = response.json()
-    except ValueError as error:
-        raise TMDBError("TMDB returned an unreadable response.") from error
-    if not response.is_success:
-        message = payload.get("status_message") if isinstance(payload, dict) else ""
-        if response.status_code in {401, 403}:
-            message = "TMDB_API was rejected. Check the TMDB API key."
-        raise TMDBError(message or f"TMDB request failed (HTTP {response.status_code}).")
-    return payload
+    public_params = {"language": "en-US"}
+    public_params.update(params or {})
+    key = _cache_key(path, public_params)
+    cached = _cached_payload(key)
+    if cached is not None:
+        return cached
+
+    lock = _REQUEST_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        cached = _cached_payload(key)
+        if cached is not None:
+            return cached
+        query = {"api_key": settings.tmdb_api_key, **public_params}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(18.0, connect=8.0)) as client:
+                response = await client.get(f"{TMDB_BASE}{path}", params=query)
+        except httpx.HTTPError as error:
+            raise TMDBError("TMDB could not be reached.") from error
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise TMDBError("TMDB returned an unreadable response.") from error
+        if not response.is_success:
+            message = payload.get("status_message") if isinstance(payload, dict) else ""
+            if response.status_code in {401, 403}:
+                message = "TMDB_API was rejected. Check the TMDB API key."
+            raise TMDBError(message or f"TMDB request failed (HTTP {response.status_code}).")
+        return _store_payload(key, payload)
 
 
 def poster(path: str | None) -> str:

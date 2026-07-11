@@ -43,6 +43,10 @@ async def initialise_database() -> None:
     await db.subtitles.create_index([("channel_id", 1), ("message_id", 1)], unique=True)
     await db.subtitles.create_index([("title_id", 1), ("status", 1), ("created_at", -1)])
     await db.subtitles.create_index([("uploader_id", 1), ("updated_at", -1)])
+    await db.subtitles.create_index(
+        [("title_id", 1), ("language", 1), ("season", 1), ("episode", 1), ("episode_end", 1), ("filename", 1), ("status", 1)],
+        name="subtitle_logical_dedupe",
+    )
     await db.episode_pages.create_index([("title_id", 1), ("season", 1), ("episode", 1)], unique=True)
     await db.episode_pages.create_index([("title_id", 1), ("updated_at", -1)])
     await db.votes.create_index([("title_id", 1), ("visitor_id", 1)], unique=True)
@@ -53,6 +57,8 @@ async def initialise_database() -> None:
     await db.maker_applications.create_index([("username", 1), ("status", 1)])
     await db.bot_drafts.create_index("expires_at", expireAfterSeconds=0)
     await db.bot_drafts.create_index([("user_id", 1), ("updated_at", -1)])
+    await db.bot_auto_posts.create_index([("source_private_chat_id", 1), ("source_private_message_id", 1)], unique=True)
+    await db.bot_auto_posts.create_index([("subtitle_id", 1)], sparse=True)
     await db.bot_states.create_index("expires_at", expireAfterSeconds=0)
     await db.bot_states.create_index("user_id", unique=True)
 

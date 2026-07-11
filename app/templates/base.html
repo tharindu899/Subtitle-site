@@ -15,6 +15,14 @@
 </head>
 <body class="page page--{{ page_name|default('home') }}">
 
+  <div class="web-bg" aria-hidden="true">
+    <span class="web-bg__glow web-bg__glow--one"></span>
+    <span class="web-bg__glow web-bg__glow--two"></span>
+    <span class="web-bg__thread web-bg__thread--one"></span>
+    <span class="web-bg__thread web-bg__thread--two"></span>
+    <span class="web-bg__thread web-bg__thread--three"></span>
+  </div>
+
   <div class="site-nav-dock" data-site-nav-dock>
     {% if ads.site_bar_top %}
       <div class="ad-ticker" data-ad-ticker aria-label="Advertisement">

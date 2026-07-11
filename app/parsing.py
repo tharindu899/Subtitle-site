@@ -233,6 +233,108 @@ def parse_caption_value(caption: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _caption_any_value(caption: str, labels: tuple[str, ...]) -> str:
+    for label in labels:
+        value = parse_caption_value(caption, label)
+        if value:
+            return value
+    return ""
+
+
+def _explicit_caption_release(caption: str) -> str:
+    """Build a release string from human caption fields or a pasted video filename.
+
+    Subtitle makers often upload a small .srt file whose name does not contain
+    enough information.  In that case the Telegram caption may contain the video
+    release name, or fields such as Name/Year/S01/E04/Quality.  This converts
+    those formats into the same release text parsed from normal filenames.
+    """
+    raw_caption = (caption or "").replace("\u00a0", " ").strip()
+    if not raw_caption:
+        return ""
+
+    name = _caption_any_value(raw_caption, ("Name", "Title", "Movie", "Movie name", "Series", "TV Show", "Show"))
+    year = _caption_any_value(raw_caption, ("Year", "Release year"))
+    quality = _caption_any_value(raw_caption, ("Quality", "Resolution"))
+    season = _caption_any_value(raw_caption, ("Season", "Season Number", "Season no"))
+    episode = _caption_any_value(raw_caption, ("Episode", "Episode Number", "Episode no", "Ep"))
+    source = _caption_any_value(raw_caption, ("Source", "Rip", "Release"))
+    codec = _caption_any_value(raw_caption, ("Codec", "Video", "Format"))
+    audio = _caption_any_value(raw_caption, ("Audio", "Audio format"))
+
+    if name:
+        parts = [name]
+        if year:
+            year_match = re.search(r"\b(?:19|20)\d{2}\b", year)
+            if year_match:
+                parts.append(year_match.group(0))
+        season_digits = re.search(r"\d{1,3}", season or "")
+        episode_digits = re.search(r"\d{1,4}", episode or "")
+        if season_digits and episode_digits:
+            parts.append(f"S{int(season_digits.group(0)):02d}E{int(episode_digits.group(0)):02d}")
+        elif season_digits:
+            parts.append(f"S{int(season_digits.group(0)):02d}")
+        if quality:
+            parts.append(quality)
+        if source:
+            parts.append(source)
+        if codec:
+            parts.append(codec)
+        if audio:
+            parts.append(audio)
+        return " ".join(str(part).strip() for part in parts if str(part).strip())
+
+    # Otherwise use the first caption line that looks like a pasted release /
+    # video filename.  Backticks and bullets are ignored so Telegram formatting
+    # does not break parsing.
+    for line in raw_caption.splitlines():
+        candidate = line.strip().strip("`*_•-–— ")
+        if not candidate:
+            continue
+        if re.search(r"\.(?:mkv|mp4|avi|mov|webm|srt|ass|ssa|vtt|zip)\b", candidate, flags=re.I):
+            return candidate
+
+        # Quality/resolution is NOT required. Accept the two minimum useful
+        # release forms too:
+        #   Movie.Name.2023
+        #   Show.Name.S01E04
+        # Optional tags such as 720p, WEB-DL, x265, DDP5.1 still improve the
+        # release details, but they are no longer needed for auto matching.
+        has_letters = bool(re.search(r"[A-Za-z]", candidate))
+        has_year = bool(re.search(r"\b(?:19|20)\d{2}\b", candidate))
+        has_episode = bool(re.search(r"\bS\d{1,3}\s*E\d{1,4}\b|\b\d{1,2}\s*[xX]\s*\d{1,4}\b", candidate, flags=re.I))
+        if has_letters and (has_year or has_episode):
+            return candidate
+
+        marker_hits = sum(1 for pattern in _RELEASE_MARKERS if re.search(pattern, candidate, flags=re.I))
+        if marker_hits >= 2 or has_year and marker_hits >= 1:
+            return candidate
+    return ""
+
+
+def _looks_generic_title(title: str) -> bool:
+    clean = re.sub(r"[^A-Za-z0-9]+", " ", title or "").strip().lower()
+    if not clean:
+        return True
+    generic = {
+        "subtitle", "subtitles", "sinhala", "sinhalese", "si", "srt", "ass",
+        "ssa", "vtt", "zip", "untitled", "movie subtitle", "series subtitle",
+    }
+    if clean in generic:
+        return True
+    words = clean.split()
+    return len(words) <= 2 and any(word in generic for word in words)
+
+
+def _merge_title_year(title: str, release_text: str) -> str:
+    if re.search(r"\b(?:19|20)\d{2}\b", title or ""):
+        return title
+    year = re.search(r"\b(?:19|20)\d{2}\b", release_text or "")
+    if year and not re.search(r"\bS\d{1,3}\s*E\d{1,4}\b", release_text or "", flags=re.I):
+        return f"{title} {year.group(0)}".strip()
+    return title
+
+
 def _title_from_filename(normal: str) -> str:
     end = _first_match_position(normal, _RELEASE_MARKERS)
     candidate = normal[:end] if end is not None else normal
@@ -245,14 +347,36 @@ def _title_from_filename(normal: str) -> str:
 
 
 def parse_subtitle_name(filename: str, caption: str = "") -> SubtitleGuess:
-    normal = _normalise(filename)
-    season, episode, episode_end = _extract_episode(normal)
-    title_guess = _title_from_filename(normal)
+    filename_normal = _normalise(filename)
+    caption_release = _explicit_caption_release(caption)
+    caption_normal = _normalise(caption_release) if caption_release else ""
+
+    file_season, file_episode, file_episode_end = _extract_episode(filename_normal)
+    cap_season, cap_episode, cap_episode_end = _extract_episode(caption_normal) if caption_normal else (None, None, None)
+
+    file_title = _title_from_filename(filename_normal)
+    cap_title = _title_from_filename(caption_normal) if caption_normal else ""
+    explicit_title = _caption_any_value(caption or "", ("Name", "Title", "Movie", "Movie name", "Series", "TV Show", "Show"))
+
+    if explicit_title:
+        title_guess = explicit_title
+    elif cap_title and (_looks_generic_title(file_title) or bool(cap_episode and not file_episode) or find_resolution(filename_normal) == "Other"):
+        title_guess = cap_title
+    else:
+        title_guess = file_title
+
+    release_for_year = caption_normal or filename_normal
+    title_guess = _merge_title_year(re.sub(r"\s+", " ", title_guess).strip(), release_for_year)
+
+    season = file_season if file_season is not None else cap_season
+    episode = file_episode if file_episode is not None else cap_episode
+    episode_end = file_episode_end if file_episode_end is not None else cap_episode_end
+
     note = parse_caption_value(caption, "Note") or parse_caption_value(caption, "Review")
-    full_text = f"{filename}\n{caption}"
+    full_text = f"{filename}\n{caption_release}\n{caption}"
     return SubtitleGuess(
         filename=filename,
-        title_guess=title_guess,
+        title_guess=title_guess or "Untitled",
         source_type=find_source(full_text),
         resolution=find_resolution(full_text),
         season=season,
@@ -263,7 +387,7 @@ def parse_subtitle_name(filename: str, caption: str = "") -> SubtitleGuess:
         codec=find_codec(full_text),
         bit_depth=find_bit_depth(full_text),
         hdr=find_hdr(full_text),
-        release_group=find_release_group(filename),
+        release_group=find_release_group(caption_release or filename),
     )
 
 

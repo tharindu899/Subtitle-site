@@ -17,6 +17,27 @@
   const navDock = document.querySelector('[data-site-nav-dock]')
   const navSpacer = document.querySelector('[data-site-nav-spacer]')
 
+
+  // Mobile browsers/WebViews sometimes keep the old vertical position when
+  // moving between episode pages. Reset only after a deliberate internal page
+  // navigation, so the next/previous buttons always open the episode from the
+  // top instead of cutting the hero title under the fixed header.
+  try {
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
+    const shouldResetScroll = sessionStorage.getItem('sinhasub:reset-scroll') === '1'
+    if (shouldResetScroll) {
+      sessionStorage.removeItem('sinhasub:reset-scroll')
+      requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }))
+    }
+    document.querySelectorAll('a[href^="/"]').forEach((link) => {
+      link.addEventListener('click', () => {
+        const href = link.getAttribute('href') || ''
+        if (!href || href.startsWith('/download/') || href.startsWith('/static/')) return
+        sessionStorage.setItem('sinhasub:reset-scroll', '1')
+      })
+    })
+  } catch { /* Storage can be disabled in private browsers. */ }
+
   // The ticker keeps the original two-lane, -50% marquee motion. The saved ad
   // code is parsed once; the second lane is a script-free visual clone, so ad
   // scripts cannot run twice or stack duplicate text/buttons on top of each other.

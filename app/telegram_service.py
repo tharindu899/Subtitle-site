@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlsplit
 from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 from typing import Any, Awaitable, Callable
@@ -27,6 +28,10 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ParseMode
 from pyrogram.errors import MessageNotModified, PeerIdInvalid
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
+try:
+    from pyrogram.handlers import EditedMessageHandler
+except ImportError:  # PyroFork/Pyrogram compatibility fallback
+    EditedMessageHandler = None
 from pyrogram.types import BotCommand, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto, Message
 
 from .config import settings
@@ -57,6 +62,9 @@ class TelegramService:
         self._on_private_command: PrivateCommandCallback | None = None
         self._on_private_text: PrivateTextCallback | None = None
         self._on_callback: CallbackHandler | None = None
+        self._peer_persist_lock = asyncio.Lock()
+        self._channel_publish_lock = asyncio.Lock()
+        self._last_persisted_channel_id: int | None = None
 
     @staticmethod
     def _channel_matches(chat: object | None) -> bool:
@@ -77,38 +85,41 @@ class TelegramService:
             self._channel_ready = True
 
     async def _persist_channel_peer(self) -> bool:
-        """Persist the private channel access hash in MongoDB.
+        """Persist the private channel access hash in MongoDB once per peer.
 
-        Telegram bot accounts cannot list dialogs after a restart, so a numeric
-        private channel ID alone is not enough. Once the bot sees a channel post
-        (or an owner forwards one to the bot), PyroFork has the access hash in its
-        peer cache. Persisting that peer lets MTProto publishing work again
-        after a Space rebuild without calling the HTTP Bot API.
+        Channel posts can arrive in a burst and every post teaches PyroFork the
+        same peer again.  Persisting on every update created noisy duplicate log
+        lines and extra MongoDB writes.  Keep it idempotent and serialized so a
+        large auto-import does not hammer the session store.
         """
         if not self._channel_ready or not isinstance(self._channel_ref, int):
             return False
-        try:
-            peer = await self.require().resolve_peer(int(self._channel_ref))
-            access_hash = getattr(peer, "access_hash", None)
-            if access_hash is None:
+        async with self._peer_persist_lock:
+            if self._last_persisted_channel_id == int(self._channel_ref):
+                return True
+            try:
+                peer = await self.require().resolve_peer(int(self._channel_ref))
+                access_hash = getattr(peer, "access_hash", None)
+                if access_hash is None:
+                    return False
+                await get_db().settings.update_one(
+                    {"_id": "telegram_channel_peer"},
+                    {
+                        "$set": {
+                            "channel_id": str(int(self._channel_ref)),
+                            "access_hash": str(int(access_hash)),
+                            "peer_type": "channel",
+                            "updated_at": utcnow(),
+                        }
+                    },
+                    upsert=True,
+                )
+                self._last_persisted_channel_id = int(self._channel_ref)
+                logger.info("Saved subtitle channel peer for MTProto delivery: %s", self._channel_ref)
+                return True
+            except Exception as error:
+                logger.debug("Could not persist subtitle channel peer: %s", error)
                 return False
-            await get_db().settings.update_one(
-                {"_id": "telegram_channel_peer"},
-                {
-                    "$set": {
-                        "channel_id": str(int(self._channel_ref)),
-                        "access_hash": str(int(access_hash)),
-                        "peer_type": "channel",
-                        "updated_at": utcnow(),
-                    }
-                },
-                upsert=True,
-            )
-            logger.info("Saved subtitle channel peer for MTProto delivery: %s", self._channel_ref)
-            return True
-        except Exception as error:
-            logger.debug("Could not persist subtitle channel peer: %s", error)
-            return False
 
     async def _restore_channel_peer(self) -> bool:
         """Restore a previously learned private channel peer from MongoDB."""
@@ -124,6 +135,7 @@ class TelegramService:
             await self.require().resolve_peer(peer_id)
             self._channel_ref = peer_id
             self._channel_ready = True
+            self._last_persisted_channel_id = peer_id
             logger.info("Restored subtitle channel peer from MongoDB: %s", peer_id)
             return True
         except Exception as error:
@@ -221,12 +233,10 @@ class TelegramService:
             bot_token=settings.bot_token,
             no_updates=False,
             workdir="/tmp",
-            # PyroFork defaults to 1 concurrent upload/download transmission.
-            # Subtitle files are small but members can submit several in a
-            # row; raising this lets those transfers overlap instead of
-            # queueing strictly one-at-a-time, which is the main source of a
-            # "slow" feeling bot under normal (non-abusive) use.
-            max_concurrent_transmissions=4,
+            # Keep Telegram media sessions conservative.  Batch subtitle
+            # submissions are serialized by this service, which avoids
+            # Pyrogram AUTH_KEY errors during several near-simultaneous sends.
+            max_concurrent_transmissions=1,
         )
         commands = ["start", "help", "menu", "submit", "myfiles", "library", "members", "reports", "ads", "connectchannel", "cancel"]
         # Remember every message from the configured channel. This binds a
@@ -234,7 +244,17 @@ class TelegramService:
         # is not a subtitle document.
         self.client.add_handler(MessageHandler(self._remember_channel_message, filters.channel), group=-1)
         self.client.add_handler(MessageHandler(self._handle_channel, filters.channel & filters.document))
+        # Edited caption support: makers can upload a file, edit the release
+        # caption afterward, and the bot/channel importer will re-parse it.
+        if EditedMessageHandler is not None:
+            self.client.add_handler(EditedMessageHandler(self._handle_channel, filters.channel & filters.document))
+        elif getattr(filters, "edited", None) is not None:
+            self.client.add_handler(MessageHandler(self._handle_channel, filters.channel & filters.document & filters.edited))
         self.client.add_handler(MessageHandler(self._handle_private_document, filters.private & filters.document))
+        if EditedMessageHandler is not None:
+            self.client.add_handler(EditedMessageHandler(self._handle_private_document, filters.private & filters.document))
+        elif getattr(filters, "edited", None) is not None:
+            self.client.add_handler(MessageHandler(self._handle_private_document, filters.private & filters.document & filters.edited))
         self.client.add_handler(MessageHandler(self._handle_private_command, filters.private & filters.command(commands)))
         self.client.add_handler(MessageHandler(self._handle_private_text, filters.private & filters.text & ~filters.command(commands)))
         # CallbackQuery is not a Message and has no `.chat` attribute.
@@ -250,8 +270,10 @@ class TelegramService:
         self.bot_username = me.username or ""
         if isinstance(self._channel_ref, str) and self._channel_ref.startswith("@"):
             await self._warm_channel_peer()
-        else:
+        elif not self._channel_ready:
             logger.info("Private numeric AUTH_CHANNEL must be linked once with /connectchannel before publishing.")
+        else:
+            logger.info("Private numeric AUTH_CHANNEL peer is ready for MTProto publishing: %s", self._channel_ref)
         try:
             await self.client.set_bot_commands(
                 [
@@ -277,6 +299,7 @@ class TelegramService:
         self.client = None
         self._channel_ready = False
         self._channel_ref = settings.channel_ref
+        self._last_persisted_channel_id = None
 
     async def _remember_channel_message(self, _client: Client, message: Message) -> None:
         await self._learn_channel_from_message(message)
@@ -324,6 +347,25 @@ class TelegramService:
             disable_web_page_preview=True,
         )
 
+    @staticmethod
+    def _safe_remote_media(value: str) -> str:
+        """Return a Telegram-safe HTTPS media URL or an empty string.
+
+        Passing TMDB poster URLs directly lets Telegram fetch the image itself.
+        That avoids repeated bot-side image downloads/uploads, which were the
+        source of parallel media-session AUTH_KEY errors during batch submits.
+        """
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = urlsplit(raw)
+        except ValueError:
+            return ""
+        if parsed.scheme.lower() != "https" or not parsed.netloc:
+            return ""
+        return raw
+
     async def _remote_poster(self, poster_url: str) -> BytesIO | None:
         if not poster_url:
             return None
@@ -362,7 +404,7 @@ class TelegramService:
         see it, so a fresh card is sent at the bottom instead.
         """
         client = self.require()
-        poster = await self._remote_poster(poster_url) if poster_url else None
+        poster = self._safe_remote_media(poster_url)
 
         if previous_message_id and not force_resend:
             try:
@@ -433,28 +475,34 @@ class TelegramService:
         keyboard: InlineKeyboardMarkup | None = None,
     ) -> Message:
         client = self.require()
-        try:
-            return await client.copy_message(
-                target,
-                source_chat_id,
-                source_message_id,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-            )
-        except Exception as first_error:
+        async with self._channel_publish_lock:
             try:
-                return await client.send_document(
+                return await client.copy_message(
                     target,
-                    file_id,
+                    source_chat_id,
+                    source_message_id,
                     caption=caption,
                     parse_mode=ParseMode.HTML,
                     reply_markup=keyboard,
                 )
-            except Exception as second_error:
-                if isinstance(first_error, PeerIdInvalid) or isinstance(second_error, PeerIdInvalid) or "PEER_ID_INVALID" in str(second_error).upper():
-                    raise TelegramStorageError(self._channel_peer_help()) from second_error
-                raise TelegramStorageError(f"Telegram could not store this file: {second_error}") from first_error
+            except Exception as first_error:
+                try:
+                    return await client.send_document(
+                        target,
+                        file_id,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard,
+                    )
+                except Exception as second_error:
+                    joined_error = f"{first_error} | {second_error}".upper()
+                    if isinstance(first_error, PeerIdInvalid) or isinstance(second_error, PeerIdInvalid) or "PEER_ID_INVALID" in joined_error:
+                        raise TelegramStorageError(self._channel_peer_help()) from second_error
+                    if "AUTH KEY" in joined_error or "UNAUTHORIZED" in joined_error:
+                        raise TelegramStorageError(
+                            "Telegram media session expired while publishing. Restart the Space once; the bot will reuse the saved channel peer after startup."
+                        ) from second_error
+                    raise TelegramStorageError(f"Telegram could not store this file: {second_error}") from first_error
 
     async def copy_document_to_channel(
         self,
